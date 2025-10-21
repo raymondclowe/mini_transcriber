@@ -90,7 +90,7 @@
       recorder = rec;
 
       let sliding = [];
-      const interval = setInterval(async ()=>{
+  const interval = setInterval(async ()=>{
         // extract audio for the last segmentMs milliseconds by requesting a slice
         // Stop the recorder briefly to get a blob, then restart and keep overlap
         if(recorder.state === 'inactive') return;
@@ -100,9 +100,29 @@
         // combine available chunks into a blob
         const blob = new Blob(chunks, { type: 'audio/webm' });
         chunks = [];
-        // Convert to WAV using AudioContext decode/encode (browser support varies)
-        // For simplicity we will send the webm to the server; the server accepts many formats
-        postChunk(blob);
+        try{
+          // decode to audio buffer, resample to 8kHz, then convert to WAV PCM16
+          const array = await blob.arrayBuffer();
+          const decoded = await audioCtx.decodeAudioData(array);
+          // create an offline context at 8kHz to render the buffer
+          const offline = new OfflineAudioContext(1, Math.ceil(decoded.duration * 8000), 8000);
+          const src = offline.createBufferSource();
+          // copy channel data (mix to mono if needed)
+          const mono = offline.createBuffer(1, decoded.length, decoded.sampleRate);
+          const idata = decoded.getChannelData(0);
+          mono.getChannelData(0).set(idata);
+          src.buffer = mono;
+          src.connect(offline.destination);
+          src.start(0);
+          const rendered = await offline.startRendering();
+          // convert rendered buffer to WAV PCM16
+          const wav = audioBufferToWav(rendered, 8000);
+          const wavBlob = new Blob([wav], { type: 'audio/wav' });
+          postChunk(wavBlob);
+        }catch(e){
+          console.warn('resample failed, sending raw blob', e);
+          postChunk(blob);
+        }
         // for overlap: do nothing special — the browser capture is continuous; requestData gives us last slice
       }, segmentMs - overlapMs);
 
@@ -110,6 +130,46 @@
       rec._interval = interval;
 
     }).catch(err=>{ console.error(err); running=false; btn.textContent='Start' });
+  }
+
+  // convert AudioBuffer to 16-bit PCM WAV (Uint8Array)
+  function audioBufferToWav(buffer, sampleRate) {
+    const numChannels = buffer.numberOfChannels;
+    const length = buffer.length * numChannels * 2 + 44;
+    const bufferArray = new ArrayBuffer(length);
+    const view = new DataView(bufferArray);
+
+    /* RIFF identifier */ writeString(view, 0, 'RIFF');
+    /* file length */ view.setUint32(4, 36 + buffer.length * numChannels * 2, true);
+    /* RIFF type */ writeString(view, 8, 'WAVE');
+    /* format chunk identifier */ writeString(view, 12, 'fmt ');
+    /* format chunk length */ view.setUint32(16, 16, true);
+    /* sample format (raw) */ view.setUint16(20, 1, true);
+    /* channel count */ view.setUint16(22, numChannels, true);
+    /* sample rate */ view.setUint32(24, sampleRate, true);
+    /* byte rate (sample rate * block align) */ view.setUint32(28, sampleRate * numChannels * 2, true);
+    /* block align (channel count * bytes per sample) */ view.setUint16(32, numChannels * 2, true);
+    /* bits per sample */ view.setUint16(34, 16, true);
+    /* data chunk identifier */ writeString(view, 36, 'data');
+    /* data chunk length */ view.setUint32(40, buffer.length * numChannels * 2, true);
+
+    // write interleaved PCM16
+    let offset = 44;
+    for (let i = 0; i < buffer.length; i++){
+      for (let ch = 0; ch < numChannels; ch++){
+        let sample = buffer.getChannelData(ch)[i];
+        // clamp
+        sample = Math.max(-1, Math.min(1, sample));
+        view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true);
+        offset += 2;
+      }
+    }
+
+    return bufferArray;
+  }
+
+  function writeString(view, offset, string){
+    for(let i=0;i<string.length;i++) view.setUint8(offset+i, string.charCodeAt(i));
   }
 
   function stopRecording(){
@@ -124,9 +184,20 @@
     if(audioCtx){ audioCtx.close(); audioCtx=null }
   }
 
-  btn.addEventListener('click', ()=>{
-    if(!running) startRecording(); else stopRecording();
-  });
+  // feature-detect getUserMedia and provide a helpful message if missing
+  const canGetUserMedia = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+  if(!canGetUserMedia){
+    btn.disabled = true;
+    const msg = document.createElement('div');
+    msg.style.marginTop = '8px';
+    msg.style.color = '#b00';
+    msg.textContent = 'Microphone capture is not available in this browser. Try a recent Chrome, Edge, or Firefox and ensure the page is served over https or localhost.';
+    btn.parentNode.insertBefore(msg, btn.nextSibling);
+  } else {
+    btn.addEventListener('click', ()=>{
+      if(!running) startRecording(); else stopRecording();
+    });
+  }
 })();
 </script>
 </body>

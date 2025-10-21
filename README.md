@@ -202,3 +202,19 @@ Limitations & next steps
 ------------------------
 - This is intentionally small and uses the openai/whisper PyTorch implementation on CPU for convenience. For production you may prefer onnxruntime or a GPU build.
 - You may want to add concurrency/queueing for real server use, and containerize with resource limits.
+
+Recent changes (local development)
+---------------------------------
+
+- Added a small browser UI at `/` (served from `static/index.html`) that records overlapping chunks, resamples to 8 kHz WAV in the browser, and POSTs them to `/transcribe` for naive stitched live transcription.
+- Added a `/health` endpoint to report whether the Whisper model has been loaded. Useful for service monitors.
+- The server will now respond to `/favicon.ico` (returns `static/favicon.ico` if present or 204 otherwise) to avoid 404 noise in browser devtools.
+- The UI now feature-detects `navigator.mediaDevices.getUserMedia` and disables the Start button with a helpful message in browsers where microphone capture is unavailable.
+- A systemd unit (`mini-transcriber.service`) was added to run the Flask app as a service (defaults: `PORT=8085`, `HOST=0.0.0.0`) and a small helper script `bin/transcribe_b64.py` can POST base64-encoded audio to the server.
+
+Reproducible, CPU-only installs
+--------------------------------
+
+This project intentionally enforces CPU-only installs. See `requirements-cpu.txt` and the checked-in `uv.lock` for the exact environment used during development. Use the `uv` helper with `--frozen` to reproduce the same CPU-only environment and avoid accidental GPU/CUDA wheel downloads.
+
+If you maintain this repo, keep `uv.lock` and `requirements-cpu.txt` up-to-date when you change dependencies so CI and reproducible installs continue to work.

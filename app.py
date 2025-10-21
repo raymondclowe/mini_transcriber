@@ -129,9 +129,20 @@ def index():
     return send_from_directory('static', 'index.html')
 
 
+@app.route('/favicon.ico')
+def favicon():
+    """Serve a favicon if present in the static directory, otherwise return no-content
+    to avoid a 404 showing up in browser devtools.
+    """
+    fav = Path('static') / 'favicon.ico'
+    if fav.exists():
+        return send_from_directory('static', 'favicon.ico')
+    return ('', 204)
+
+
 if __name__ == '__main__':
     import os
     port = int(os.environ.get('PORT', '8080'))
-    host = os.environ.get('HOST', '127.0.0.1')
+    host = os.environ.get('HOST', '0.0.0.0')
     print(f"Starting app on {host}:{port}")
     app.run(host=host, port=port)
