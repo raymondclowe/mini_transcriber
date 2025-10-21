@@ -1,0 +1,5 @@
+- be consise; less prose, more bullet points. 
+- Sacrafice grammer and politeness of briefness and clarity.
+- Save important learnings into LEARNINGS.md to avoid reinventing the wheel or making same mistakes repeatedly
+- Check LEARNINGS.md before asking for help or searching online
+- lets switch to using 'uv run' 'uv add' instead of python / pip

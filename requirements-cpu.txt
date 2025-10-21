@@ -1,0 +1,9 @@
+flask
+numpy==1.26.4
+soundfile==0.12.1
+sounddevice==0.4.6
+transformers==4.35.0
+sentencepiece==0.1.99
+# Note: We intentionally exclude torch, torchaudio and whisper here to avoid
+# accidentally pulling large GPU/CUDA builds. Install them separately with the
+# CPU-specific instructions in README.md when needed.

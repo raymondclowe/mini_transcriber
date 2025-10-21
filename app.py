@@ -7,13 +7,29 @@ app = Flask(__name__)
 model = None
 
 
-@app.before_first_request
 def load_model():
+    """Load the whisper model. Registered with the Flask app using
+    `app.before_serving` for Flask 3 compatibility (replaces the removed
+    `before_first_request` decorator).
+    """
     global model
     if model is None:
         print("Loading whisper tiny model (this may take a while)...")
         model = whisper.load_model("tiny")
         print("Model loaded.")
+
+
+# Register model loader to run before the server starts handling requests.
+try:
+    # Flask 3: before_first_request removed; use before_serving
+    app.before_serving(load_model)
+except Exception:
+    # Fallback for older Flask versions that still support before_first_request
+    try:
+        app.before_first_request(load_model)
+    except Exception:
+        # If neither is available, the model will be loaded lazily in transcribe
+        pass
 
 
 @app.route("/transcribe", methods=["POST"])

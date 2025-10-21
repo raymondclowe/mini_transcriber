@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+      - name: Install dependencies (CPU-only)
+        run: |
+          python -m pip install --upgrade pip
+          # Install CPU-only PyTorch wheels to avoid CUDA packages
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu \
+            torch==2.2.2+cpu torchaudio==2.2.2+cpu -f https://download.pytorch.org/whl/cpu/torch_stable.html
+          python -m pip install -r requirements-cpu.txt
+          python -m pip install pytest
+      - name: Run tests
+        run: |
+          PYTHONPATH=. pytest -q
