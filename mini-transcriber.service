@@ -1,0 +1,16 @@
+[Unit]
+Description=Mini Transcriber Flask Service
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/mini_transcriber
+Environment=PORT=8080
+Environment=PATH=/opt/mini_transcriber/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
+ExecStart=/opt/mini_transcriber/venv/bin/python /opt/mini_transcriber/app.py
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

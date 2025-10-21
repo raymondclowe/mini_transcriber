@@ -1,0 +1,9 @@
+torch==2.2.2
+torchaudio==2.2.2
+whisper==20230314
+flask==2.3.4
+soundfile==0.12.1
+sounddevice==0.4.6
+numpy==1.26.4
+transformers==4.35.0
+sentencepiece==0.1.99
