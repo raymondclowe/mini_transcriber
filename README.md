@@ -63,6 +63,24 @@ python -m pip install --index-url https://download.pytorch.org/whl/cpu \
 	torch==2.2.2+cpu torchaudio==2.2.2+cpu -f https://download.pytorch.org/whl/cpu/torch_stable.html
 ```
 
+NO GPU / Deterministic CPU installs
+----------------------------------
+
+This repo enforces CPU-only, deterministic installs via `requirements-cpu.txt` and the
+`uv.lock` lockfile. To reproduce the exact CPU-only environment we used in
+CI and local testing, run:
+
+```bash
+# ensure `uv` is installed and available
+uv add --frozen --requirements requirements-cpu.txt
+uv run python -m pip check
+```
+
+This will install the exact pinned CPU packages (including `torch==2.2.2+cpu`) and
+prevent any GPU/CUDA wheels (triton/nvidia) from being pulled. If you need GPU
+capability intentionally, use `requirements-full.txt` or set `INSTALL_FULL=1` in
+`setup.sh` on a machine that has proper GPU drivers.
+
 Quick test run (recommended, no GPU downloads)
 ---------------------------------------------
 
