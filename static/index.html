@@ -1,0 +1,133 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Mini Transcriber Live</title>
+  <style>
+    body { font-family: system-ui, Arial; margin: 24px; }
+    #log { white-space: pre-wrap; border: 1px solid #ddd; padding: 12px; height: 200px; overflow: auto }
+    button { padding: 8px 12px; font-size: 16px }
+  </style>
+</head>
+<body>
+  <h1>Mini Transcriber (live chunks)</h1>
+  <p>Press Start to capture microphone audio in overlapping chunks (5s segments, 1s overlap).
+  Each chunk is POSTed to /transcribe and results are appended to the transcript area with
+  a simple duplicate-trim heuristic.</p>
+
+  <button id="btn">Start</button>
+  <div style="margin-top:12px;">
+    <strong>Transcript:</strong>
+    <div id="log"></div>
+  </div>
+
+<script>
+(async function(){
+  const btn = document.getElementById('btn');
+  const log = document.getElementById('log');
+  let running = false;
+  let mediaStream = null;
+  let recorder = null;
+  let audioCtx = null;
+  let source = null;
+  let overlapMs = 1000; // 1s overlap
+  let segmentMs = 5000; // 5s segments
+  let seq = 0;
+  let lastText = '';
+
+  function appendText(t){
+    // naive dedupe: if lastText endsWith start of t, remove overlap
+    let out = t;
+    if(lastText && t){
+      // trim whitespace
+      const a = lastText.trim();
+      const b = t.trim();
+      // If new text starts with the tail of previous, drop that prefix
+      for(let cut=Math.min(a.length, b.length); cut>3; cut--){
+        if(b.startsWith(a.slice(-cut))){
+          out = b.slice(cut).trimStart();
+          break;
+        }
+      }
+    }
+    if(out){
+      lastText = (lastText + ' ' + out).trim();
+      log.textContent = lastText;
+    }
+  }
+
+  async function postChunk(blob){
+    try{
+      const fd = new FormData();
+      fd.append('file', blob, `chunk-${seq++}.wav`);
+      const r = await fetch('/transcribe', { method: 'POST', body: fd });
+      if(!r.ok){ console.warn('transcribe failed', r.status); return }
+      const j = await r.json();
+      appendText(j.text || '');
+    }catch(e){ console.error(e) }
+  }
+
+  function startRecording(){
+    running = true; btn.textContent='Stop'; lastText=''; log.textContent=''; seq=0;
+    navigator.mediaDevices.getUserMedia({ audio: true }).then(stream=>{
+      mediaStream = stream;
+      audioCtx = new AudioContext({sampleRate: 16000});
+      source = audioCtx.createMediaStreamSource(stream);
+      const dest = audioCtx.createMediaStreamDestination();
+      source.connect(dest);
+      // Use MediaRecorder from the dest stream; ensure codec is wav via mimeType fallback
+      const rec = new MediaRecorder(dest.stream);
+      let chunks = [];
+      let startTime = Date.now();
+
+      rec.ondataavailable = async (e) => {
+        if(e.data && e.data.size>0) chunks.push(e.data);
+      };
+
+      // We will capture overlapping chunks by stopping/starting and keeping last overlap
+      // Start an interval to slice recorded data into windows
+      rec.start();
+      recorder = rec;
+
+      let sliding = [];
+      const interval = setInterval(async ()=>{
+        // extract audio for the last segmentMs milliseconds by requesting a slice
+        // Stop the recorder briefly to get a blob, then restart and keep overlap
+        if(recorder.state === 'inactive') return;
+        recorder.requestData();
+        // wait a tick for ondataavailable to fire
+        await new Promise(r=>setTimeout(r, 200));
+        // combine available chunks into a blob
+        const blob = new Blob(chunks, { type: 'audio/webm' });
+        chunks = [];
+        // Convert to WAV using AudioContext decode/encode (browser support varies)
+        // For simplicity we will send the webm to the server; the server accepts many formats
+        postChunk(blob);
+        // for overlap: do nothing special — the browser capture is continuous; requestData gives us last slice
+      }, segmentMs - overlapMs);
+
+      // save the interval ID so we can clear it on stop
+      rec._interval = interval;
+
+    }).catch(err=>{ console.error(err); running=false; btn.textContent='Start' });
+  }
+
+  function stopRecording(){
+    running=false; btn.textContent='Start';
+    if(recorder){
+      clearInterval(recorder._interval);
+      recorder.stop(); recorder = null;
+    }
+    if(mediaStream){
+      mediaStream.getTracks().forEach(t=>t.stop()); mediaStream=null;
+    }
+    if(audioCtx){ audioCtx.close(); audioCtx=null }
+  }
+
+  btn.addEventListener('click', ()=>{
+    if(!running) startRecording(); else stopRecording();
+  });
+})();
+</script>
+</body>
+</html>

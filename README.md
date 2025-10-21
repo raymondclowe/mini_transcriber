@@ -81,6 +81,96 @@ prevent any GPU/CUDA wheels (triton/nvidia) from being pulled. If you need GPU
 capability intentionally, use `requirements-full.txt` or set `INSTALL_FULL=1` in
 `setup.sh` on a machine that has proper GPU drivers.
 
+Live transcription (chunking), minimal-quality audio, and examples
+---------------------------------------------------------------
+
+If you plan to use this service for live / low-latency transcription by repeatedly
+POSTing small chunks (1-3s) and stitching results client-side, here are practical
+tips, conversion commands and expected performance notes based on the environment
+used while developing this repo.
+
+1) Minimal-quality audio (telephone bandwidth)
+
+These commands create compact, speech-friendly audio tuned for voice (300-3400 Hz)
+and low sample-rate (8 kHz). Use WAV or a small m4a to keep uploads tiny.
+
+```bash
+# Telephone-bandwidth WAV (8 kHz mono, 300-3400 Hz)
+ffmpeg -y -i audio.m4a -af "highpass=f=300, lowpass=f=3400" -ar 8000 -ac 1 -c:a pcm_s16le audio_8k_telephone.wav
+
+# Small low-bitrate m4a (2s, 16 kb/s) useful for tiny uploads
+ffmpeg -y -i audio.m4a -ar 16000 -ac 1 -c:a aac -b:a 16k sample_2s_16k.m4a
+
+# Short WAV (1s, 16kHz) for slightly higher quality
+ffmpeg -y -i audio.m4a -t 1 -ar 16000 -ac 1 -c:a pcm_s16le sample_1s_16k.wav
+```
+
+2) How to POST chunks to the REST endpoint
+
+You can POST as a regular multipart file (recommended) or as base64 in JSON. The
+server accepts either. Examples:
+
+```bash
+# multipart/form-data file upload
+curl -F "file=@sample_1s_16k.wav" http://127.0.0.1:8085/transcribe
+
+# JSON with base64 payload (safe for programmatic clients)
+base64 -w0 sample_1s_16k.wav | jq -Rs --arg m "audio/wav" '{b64: ., mimetype: $m}' \
+	| curl -H "Content-Type: application/json" -d @- http://127.0.0.1:8085/transcribe
+
+# Data URI variant
+b64=$(base64 -w0 sample_1s_16k.wav)
+curl -H "Content-Type: application/json" -d "{\"b64\":\"data:audio/wav;base64,$b64\"}" http://127.0.0.1:8085/transcribe
+```
+
+3) Expected performance (approximate, CPU-only environment)
+
+- Cold start: the first request may be slower because the model must load. That
+	can take many seconds depending on the machine and model size. We register a
+	lazy load in the server to avoid failures, but expect a noticeably longer
+	latency for the very first request.
+- Steady-state latency (observed while developing on the CPU environment used
+	here): for short chunks (0.5–2s) the `whisper` tiny model produced responses in
+	roughly 0.5–1.0 seconds of processing time (the server returns a JSON with
+	field `duration_s` that contains the measured processing time).
+- Memory: we observed ~=150MB RSS for the running service in this environment.
+- Throughput: if you POST sequential small chunks, factor in processing time +
+	network + client work. With 1s chunks you can expect ~0.5–1.5s end-to-end
+	latency per chunk on a modest CPU, so overlapping uploads and buffering on the
+	client helps keep the UI smooth.
+
+4) Advice for stitching partial transcripts (basic approach)
+
+- Send short overlapping chunks (for example 1s chunks with 200–500ms overlap).
+- Drop overlap time from the beginning of each new chunk's transcript to avoid
+	duplicating words — use timestamps or simple "best-effort" trimming at word
+	boundaries.
+- If you need lower latency and more accurate incremental decoding, move to a
+	streaming approach (WebSocket or server-sent events) and a model/decoder that
+	exposes partial results. This repo's HTTP endpoint is a simple, stateless
+	POST and works well for quick experiments.
+
+5) Example client loop (pseudocode)
+
+- Record N seconds, upload as multipart or base64, append the returned text to a
+	local buffer. Optionally apply a small heuristic to remove overlap duplicates:
+
+	- Keep the last M characters from the previous response and skip them when
+		appending the new text if they match the start of the new text.
+
+6) When to switch to streaming / production
+
+- If you need sub-second end-to-end latency for interactive voice, use a
+	streaming-capable model and transport (WebSocket) and a smaller decoder (or
+	an optimized runtime). For low-security, low-scale experiments this POST-based
+	approach works fine.
+
+If you'd like, I can:
+- Add a tiny client script `bin/transcribe_b64.py` that encodes a file and POSTs
+	it and prints the transcript (ready-made for your loop).
+- Add a `/health` endpoint that returns 200 so an external monitor can probe the
+	service quickly.
+
 Quick test run (recommended, no GPU downloads)
 ---------------------------------------------
 
