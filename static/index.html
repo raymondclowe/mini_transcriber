@@ -27,6 +27,25 @@
     <div id="log"></div>
   </div>
 
+  <div style="margin-top:18px;border-top:1px solid #eee;padding-top:12px;">
+    <h3>API & Tech details</h3>
+    <div id="apiSummary" style="font-size:14px;color:#333">
+      <p>This page posts audio chunks to <code>/transcribe</code> (multipart/form-data or JSON with base64) and probes <code>/health</code> to check model readiness.</p>
+      <p>Machine-readable API spec: <a id="openapiLink" href="/openapi.json">/openapi.json</a></p>
+      <details>
+        <summary style="cursor:pointer">Full details</summary>
+        <pre style="white-space:pre-wrap;background:#f8f8f8;padding:8px;border:1px solid #eee;margin-top:8px;font-size:13px">POST /transcribe
+ - Accepts multipart/form-data with field `file` (binary audio), or JSON `{ b64: "...base64..." }`.
+ - Returns JSON `{ text: string, duration_s: number }`.
+
+GET /health
+ - Returns JSON `{ status: 'ok'|'loading', model_loaded: bool }`.
+
+OpenAPI discovery available at /openapi.json (OpenAPI 3.0 minimal spec).</pre>
+      </details>
+    </div>
+  </div>
+
 <script>
 (async function(){
   const btn = document.getElementById('btn');

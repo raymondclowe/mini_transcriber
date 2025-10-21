@@ -123,6 +123,94 @@ def health():
     })
 
 
+@app.route('/openapi.json', methods=['GET'])
+def openapi():
+    """Return a minimal OpenAPI 3 spec describing the service for automated discovery.
+    The spec intentionally focuses on the public endpoints used by clients: `/transcribe` and `/health`.
+    """
+    host = request.host_url.rstrip('/')
+    spec = {
+        "openapi": "3.0.3",
+        "info": {
+            "title": "mini_transcriber API",
+            "version": "1.0.0",
+            "description": "Minimal CPU-first transcription service: POST audio to /transcribe or probe /health."
+        },
+        "servers": [{"url": host}],
+        "paths": {
+            "/transcribe": {
+                "post": {
+                    "summary": "Transcribe an audio file or base64 payload",
+                    "requestBody": {
+                        "content": {
+                            "multipart/form-data": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "file": {"type": "string", "format": "binary"}
+                                    },
+                                    "required": ["file"]
+                                }
+                            },
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "b64": {"type": "string", "description": "Base64 or data: URI containing audio bytes"},
+                                        "mimetype": {"type": "string"},
+                                        "filename": {"type": "string"}
+                                    }
+                                }
+                            }
+                        },
+                        "required": True
+                    },
+                    "responses": {
+                        "200": {
+                            "description": "Transcription result",
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "text": {"type": "string"},
+                                            "duration_s": {"type": "number", "format": "float"}
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        "400": {"description": "Bad request (no file / invalid base64)"},
+                        "500": {"description": "Server error (model load failure or other)"}
+                    }
+                }
+            },
+            "/health": {
+                "get": {
+                    "summary": "Health probe",
+                    "responses": {
+                        "200": {
+                            "description": "Health status",
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "status": {"type": "string"},
+                                            "model_loaded": {"type": "boolean"}
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return jsonify(spec)
+
+
 @app.route('/')
 def index():
     # Serve a simple frontend app from the static folder
