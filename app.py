@@ -8,31 +8,30 @@ import tempfile
 import mimetypes
 
 app = Flask(__name__)
-model = None
+# Model cache: {model_name: model_obj}
+model_cache = {}
+DEFAULT_MODEL = "tiny"
 
 
-def load_model():
-    """Load the whisper model. Registered with the Flask app using
-    `app.before_serving` for Flask 3 compatibility (replaces the removed
-    `before_first_request` decorator).
-    """
-    global model
-    if model is None:
-        print("Loading whisper tiny model (this may take a while)...")
-        model = whisper.load_model("tiny")
-        print("Model loaded.")
+
+def load_model(model_name=DEFAULT_MODEL):
+    """Load and cache the whisper model by name."""
+    global model_cache
+    if model_name not in model_cache:
+        print(f"Loading whisper model '{model_name}' (this may take a while)...")
+        model_cache[model_name] = whisper.load_model(model_name)
+        print(f"Model '{model_name}' loaded.")
+    return model_cache[model_name]
 
 
-# Register model loader to run before the server starts handling requests.
+
+# Preload default model before serving (optional, improves cold start)
 try:
-    # Flask 3: before_first_request removed; use before_serving
-    app.before_serving(load_model)
+    app.before_serving(lambda: load_model(DEFAULT_MODEL))
 except Exception:
-    # Fallback for older Flask versions that still support before_first_request
     try:
-        app.before_first_request(load_model)
+        app.before_first_request(lambda: load_model(DEFAULT_MODEL))
     except Exception:
-        # If neither is available, the model will be loaded lazily in transcribe
         pass
 
 
@@ -43,6 +42,13 @@ def transcribe():
     # 2) JSON body with {'b64': '<base64 or data:<mime>;base64,...>'}
     # 3) Form-encoded field 'b64' with base64 string
     file_path = None
+    model_name = request.args.get('model') or request.form.get('model')
+    # Also support JSON body with 'model' field
+    if not model_name and request.is_json:
+        payload = request.get_json(silent=True) or {}
+        model_name = payload.get('model')
+    if not model_name:
+        model_name = DEFAULT_MODEL
 
     if 'file' in request.files:
         f = request.files['file']
@@ -55,12 +61,17 @@ def transcribe():
         mimetype = None
         filename = None
         if request.is_json:
-            payload = request.get_json(silent=True) or {}
+            language = request.args.get('language') or request.form.get('language')
+            # Also support JSON body with 'model' and 'language' field
             b64 = payload.get('b64') or payload.get('audio')
             mimetype = payload.get('mimetype')
             filename = payload.get('filename')
+                if not language:
+                    language = payload.get('language')
         if not b64:
             b64 = request.form.get('b64') or request.form.get('audio')
+            if not language:
+                language = 'en'
             mimetype = mimetype or request.form.get('mimetype')
             filename = filename or request.form.get('filename')
 
@@ -95,13 +106,11 @@ def transcribe():
     if not file_path:
         return jsonify({"error": "no file provided"}), 400
 
-    # Ensure model is loaded lazily if the pre-loading hook didn't run
+    # Load requested model (cache in memory)
     try:
-        if model is None:
-            load_model()
-    except Exception:
-        # If model loading fails, return an informative error instead of 500
-        return jsonify({"error": "failed to load model"}), 500
+        model = load_model(model_name)
+    except Exception as e:
+        return jsonify({"error": f"failed to load model '{model_name}': {e}"}), 500
 
     start = time.time()
     result = model.transcribe(file_path)
@@ -109,17 +118,20 @@ def transcribe():
 
     return jsonify({
         "text": result.get('text',''),
-        "duration_s": end - start
+        "duration_s": end - start,
+        "model": model_name
     })
 
 
 @app.route('/health', methods=['GET'])
 def health():
     """Health endpoint reporting model status and basic process info."""
-    loaded = model is not None
+    # Report which models are loaded
+    loaded_models = list(model_cache.keys())
     return jsonify({
-        'status': 'ok' if loaded else 'loading',
-        'model_loaded': loaded
+        'status': 'ok' if loaded_models else 'loading',
+        'model_loaded': bool(loaded_models),
+            result = model.transcribe(file_path, language=language)
     })
 
 
