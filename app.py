@@ -61,13 +61,14 @@ def transcribe():
         mimetype = None
         filename = None
         if request.is_json:
+            payload = request.get_json(silent=True) or {}
             language = request.args.get('language') or request.form.get('language')
             # Also support JSON body with 'model' and 'language' field
             b64 = payload.get('b64') or payload.get('audio')
             mimetype = payload.get('mimetype')
             filename = payload.get('filename')
-                if not language:
-                    language = payload.get('language')
+            if not language:
+                language = payload.get('language')
         if not b64:
             b64 = request.form.get('b64') or request.form.get('audio')
             if not language:
@@ -119,7 +120,8 @@ def transcribe():
     return jsonify({
         "text": result.get('text',''),
         "duration_s": end - start,
-        "model": model_name
+        "model": model_name,
+        "language": language
     })
 
 
@@ -131,7 +133,7 @@ def health():
     return jsonify({
         'status': 'ok' if loaded_models else 'loading',
         'model_loaded': bool(loaded_models),
-            result = model.transcribe(file_path, language=language)
+        'loaded_models': loaded_models
     })
 
 
