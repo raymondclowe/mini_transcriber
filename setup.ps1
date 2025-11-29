@@ -103,14 +103,14 @@ if ($uvFound) {
                     -f https://download.pytorch.org/whl/cpu/torch_stable.html `
                     torch==2.2.2+cpu torchaudio==2.2.2+cpu 2>$null
                 
-                # Install numba/llvmlite
+                # Install numba/llvmlite (whisper dependencies - use pip as uv add may not handle these well)
                 Write-Host "Installing numba and llvmlite..." -ForegroundColor Cyan
-                & uv pip install numba llvmlite 2>$null
+                & uv pip install llvmlite numba 2>$null
                 
                 # Install remaining runtime deps
                 & uv add --index-strategy unsafe-best-match flask numpy soundfile sounddevice tqdm regex tiktoken requests 2>$null
                 
-                # Install openai-whisper
+                # Install openai-whisper (use pip with --no-deps to avoid pulling heavy optional deps)
                 Write-Host "Installing openai-whisper..." -ForegroundColor Cyan
                 & uv pip install --no-deps git+https://github.com/openai/whisper.git@main 2>$null
                 
@@ -156,9 +156,11 @@ if ($uvFound) {
             & python -m pip install llvmlite numba 2>$null
             
             Write-Host "Installing openai-whisper and CPU runtime requirements..." -ForegroundColor Cyan
+            # Use --no-deps for whisper to avoid pulling heavy optional deps
             & python -m pip install --no-deps git+https://github.com/openai/whisper.git@main 2>$null
-            & python -m pip install -r requirements-cpu.txt 2>$null
+            $cpuInstallResult = & python -m pip install -r requirements-cpu.txt 2>&1
             if ($LASTEXITCODE -ne 0) {
+                Write-Host "Warning: requirements-cpu.txt install had issues, installing essential packages..." -ForegroundColor Yellow
                 & python -m pip install pytest flask numpy
             }
             
