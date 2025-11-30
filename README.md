@@ -10,13 +10,30 @@ This is based on work from the original repository: https://github.com/DakeQQ/Tr
 
 Quick start
 -----------
-On Debian/Ubuntu:
+
+### Linux (Debian/Ubuntu)
 
 ```bash
 sudo apt update
 sudo apt install -y ffmpeg python3-venv git
 ./setup.sh
 ```
+
+### Windows
+
+Prerequisites:
+- Python 3.12+ from https://www.python.org/downloads/
+- FFmpeg (optional, for audio conversion) from https://ffmpeg.org/download.html or via `winget install ffmpeg`
+
+```powershell
+# Run in PowerShell
+.\setup.ps1
+
+# Or from cmd.exe
+setup.bat
+```
+
+For CPU-only install (default), the script installs minimal dependencies. Set `$env:INSTALL_FULL="1"` before running for full GPU-capable install.
 
 Then download model assets (tiny) and run the CLI.
 
@@ -34,17 +51,33 @@ uv run python cli.py path/to/audio.wav
 If you don't have `uv` available, use the venv + pip fallback shown below:
 
 ```bash
+# Linux/macOS
 source venv/bin/activate
 python download_model.py --model tiny
 python cli.py path/to/audio.wav
+```
+
+```powershell
+# Windows (PowerShell)
+.\venv\Scripts\Activate.ps1
+python download_model.py --model tiny
+python cli.py path\to\audio.wav
 ```
 
 Run the Flask server with `uv` or the venv fallback:
 
 ```bash
 uv run python app.py
-# or with venv activated:
+
+# Linux/macOS with venv activated:
 source venv/bin/activate
+python app.py
+# POST audio file to http://127.0.0.1:8080/transcribe
+```
+
+```powershell
+# Windows with venv activated:
+.\venv\Scripts\Activate.ps1
 python app.py
 # POST audio file to http://127.0.0.1:8080/transcribe
 ```
@@ -177,22 +210,38 @@ Quick test run (recommended, no GPU downloads)
 Use `uv` to set up a small test environment and run pytest without pulling heavy deps:
 
 ```bash
+# Linux/macOS
 uv init
 uv venv
 uv add pytest flask numpy
 PYTHONPATH=. uv run pytest -q
 ```
 
+```powershell
+# Windows (PowerShell)
+uv init
+uv venv
+uv add pytest flask numpy
+$env:PYTHONPATH="."; uv run pytest -q
+```
+
 If you want to install everything from `requirements.txt` (including torch), opt in:
 
 ```bash
-# opt into full install (may download large GPU packages)
+# Linux/macOS - opt into full install (may download large GPU packages)
 INSTALL_FULL=1 ./setup.sh
+```
+
+```powershell
+# Windows (PowerShell)
+$env:INSTALL_FULL="1"; .\setup.ps1
 ```
 
 What it includes
 ----------------
-- `setup.sh` — installs system packages (FFmpeg), creates a Python venv and installs minimal Python deps.
+- `setup.sh` — Linux/macOS setup: installs system packages (FFmpeg), creates a Python venv and installs minimal Python deps.
+- `setup.ps1` — Windows PowerShell setup script (equivalent to setup.sh).
+- `setup.bat` — Windows batch file wrapper for setup.ps1.
 - `requirements.txt` — CPU-friendly dependencies.
 - `download_model.py` — helper to download small whisper model files to a local model cache.
 - `cli.py` — transcribe local audio or system microphone (requires `sounddevice` for mic capture).
