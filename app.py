@@ -42,6 +42,7 @@ def transcribe():
     # 2) JSON body with {'b64': '<base64 or data:<mime>;base64,...>'}
     # 3) Form-encoded field 'b64' with base64 string
     file_path = None
+    language = request.args.get('language') or request.form.get('language') or 'en'
     model_name = request.args.get('model') or request.form.get('model')
     # Also support JSON body with 'model' field
     if not model_name and request.is_json:
@@ -62,17 +63,16 @@ def transcribe():
         filename = None
         if request.is_json:
             payload = request.get_json(silent=True) or {}
-            language = request.args.get('language') or request.form.get('language')
-            # Also support JSON body with 'model' and 'language' field
+            # Also support JSON body with 'language' field
+            if not language or language == 'en':
+                json_lang = payload.get('language')
+                if json_lang:
+                    language = json_lang
             b64 = payload.get('b64') or payload.get('audio')
             mimetype = payload.get('mimetype')
             filename = payload.get('filename')
-            if not language:
-                language = payload.get('language')
         if not b64:
             b64 = request.form.get('b64') or request.form.get('audio')
-            if not language:
-                language = 'en'
             mimetype = mimetype or request.form.get('mimetype')
             filename = filename or request.form.get('filename')
 
