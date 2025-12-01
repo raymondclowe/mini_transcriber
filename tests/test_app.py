@@ -184,3 +184,14 @@ def test_openai_transcribe_with_language_and_prompt(client, monkeypatch):
     assert rv.status_code == 200
     assert captured_kwargs.get('language') == 'es'
     assert captured_kwargs.get('initial_prompt') == 'This is a test prompt'
+
+
+def test_openai_transcribe_invalid_temperature(client):
+    """Test OpenAI endpoint returns error for invalid temperature value."""
+    data = {
+        'file': (io.BytesIO(b'RIFF....WAVEfmt '), 'test.wav'),
+        'temperature': 'invalid'
+    }
+    rv = client.post('/v1/audio/transcriptions', data=data, content_type='multipart/form-data')
+    assert rv.status_code == 400
+    assert 'Invalid temperature' in rv.json.get('error', {}).get('message', '')

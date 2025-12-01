@@ -191,7 +191,7 @@ def openai_transcribe():
         try:
             temperature = float(temperature)
         except ValueError:
-            temperature = None
+            return jsonify({"error": {"message": f"Invalid temperature value: '{temperature}'. Must be a number between 0 and 1.", "type": "invalid_request_error"}}), 400
     
     # Handle file upload
     if 'file' not in request.files:
