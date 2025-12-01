@@ -125,6 +125,148 @@ def transcribe():
     })
 
 
+def format_timestamp(seconds):
+    """Format seconds as HH:MM:SS,mmm for SRT or HH:MM:SS.mmm for VTT."""
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs = int(seconds % 60)
+    millis = int((seconds % 1) * 1000)
+    return hours, minutes, secs, millis
+
+
+def generate_srt(segments):
+    """Generate SRT formatted subtitles from whisper segments."""
+    lines = []
+    for i, seg in enumerate(segments, 1):
+        start = seg.get('start', 0)
+        end = seg.get('end', 0)
+        text = seg.get('text', '').strip()
+        h1, m1, s1, ms1 = format_timestamp(start)
+        h2, m2, s2, ms2 = format_timestamp(end)
+        lines.append(str(i))
+        lines.append(f"{h1:02d}:{m1:02d}:{s1:02d},{ms1:03d} --> {h2:02d}:{m2:02d}:{s2:02d},{ms2:03d}")
+        lines.append(text)
+        lines.append("")
+    return "\n".join(lines)
+
+
+def generate_vtt(segments):
+    """Generate WebVTT formatted subtitles from whisper segments."""
+    lines = ["WEBVTT", ""]
+    for seg in segments:
+        start = seg.get('start', 0)
+        end = seg.get('end', 0)
+        text = seg.get('text', '').strip()
+        h1, m1, s1, ms1 = format_timestamp(start)
+        h2, m2, s2, ms2 = format_timestamp(end)
+        lines.append(f"{h1:02d}:{m1:02d}:{s1:02d}.{ms1:03d} --> {h2:02d}:{m2:02d}:{s2:02d}.{ms2:03d}")
+        lines.append(text)
+        lines.append("")
+    return "\n".join(lines)
+
+
+@app.route('/v1/audio/transcriptions', methods=['POST'])
+def openai_transcribe():
+    """OpenAI compatible whisper transcription endpoint.
+    
+    Accepts multipart/form-data with:
+    - file: audio file (required)
+    - model: whisper model name (optional, default: tiny)
+    - response_format: json|text|verbose_json|srt|vtt (optional, default: json)
+    - language: language code (optional, default: en)
+    - prompt: optional prompt to guide transcription
+    - temperature: sampling temperature (optional)
+    """
+    file_path = None
+    
+    # Extract parameters from form data
+    model_name = request.form.get('model', DEFAULT_MODEL)
+    response_format = request.form.get('response_format', 'json')
+    language = request.form.get('language')
+    prompt = request.form.get('prompt')
+    temperature = request.form.get('temperature')
+    
+    # Parse temperature if provided
+    if temperature:
+        try:
+            temperature = float(temperature)
+        except ValueError:
+            temperature = None
+    
+    # Handle file upload
+    if 'file' not in request.files:
+        return jsonify({"error": {"message": "No file provided", "type": "invalid_request_error"}}), 400
+    
+    f = request.files['file']
+    if f.filename == '':
+        return jsonify({"error": {"message": "No file selected", "type": "invalid_request_error"}}), 400
+    
+    # Get file extension from uploaded filename
+    ext = Path(f.filename).suffix or '.wav'
+    
+    # Save uploaded file
+    tf = tempfile.NamedTemporaryFile(delete=False, suffix=ext, prefix='openai_upload_')
+    f.save(tf.name)
+    tf.close()
+    file_path = tf.name
+    
+    # Load requested model
+    try:
+        model = load_model(model_name)
+    except Exception as e:
+        return jsonify({"error": {"message": f"Failed to load model '{model_name}': {e}", "type": "server_error"}}), 500
+    
+    # Build transcription options
+    transcribe_opts = {}
+    if language:
+        transcribe_opts['language'] = language
+    if prompt:
+        transcribe_opts['initial_prompt'] = prompt
+    if temperature is not None:
+        transcribe_opts['temperature'] = temperature
+    
+    # Perform transcription
+    try:
+        result = model.transcribe(file_path, **transcribe_opts)
+    except Exception as e:
+        return jsonify({"error": {"message": f"Transcription failed: {e}", "type": "server_error"}}), 500
+    finally:
+        # Clean up temp file
+        try:
+            Path(file_path).unlink()
+        except Exception:
+            pass
+    
+    text = result.get('text', '').strip()
+    segments = result.get('segments', [])
+    detected_language = result.get('language', language or 'en')
+    duration = result.get('duration', 0)
+    
+    # Format response based on response_format
+    if response_format == 'text':
+        return text, 200, {'Content-Type': 'text/plain; charset=utf-8'}
+    
+    elif response_format == 'srt':
+        srt_content = generate_srt(segments)
+        return srt_content, 200, {'Content-Type': 'text/plain; charset=utf-8'}
+    
+    elif response_format == 'vtt':
+        vtt_content = generate_vtt(segments)
+        return vtt_content, 200, {'Content-Type': 'text/plain; charset=utf-8'}
+    
+    elif response_format == 'verbose_json':
+        return jsonify({
+            "task": "transcribe",
+            "language": detected_language,
+            "duration": duration,
+            "text": text,
+            "segments": segments
+        })
+    
+    else:  # default: json
+        return jsonify({"text": text})
+
+
 @app.route('/health', methods=['GET'])
 def health():
     """Health endpoint reporting model status and basic process info."""
@@ -196,6 +338,51 @@ def openapi():
                         },
                         "400": {"description": "Bad request (no file / invalid base64)"},
                         "500": {"description": "Server error (model load failure or other)"}
+                    }
+                }
+            },
+            "/v1/audio/transcriptions": {
+                "post": {
+                    "summary": "OpenAI compatible transcription endpoint",
+                    "description": "Transcribes audio following the OpenAI Whisper API format",
+                    "requestBody": {
+                        "content": {
+                            "multipart/form-data": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "file": {"type": "string", "format": "binary", "description": "The audio file to transcribe"},
+                                        "model": {"type": "string", "description": "Whisper model name (tiny, base, small, medium, large)", "default": "tiny"},
+                                        "response_format": {"type": "string", "enum": ["json", "text", "srt", "vtt", "verbose_json"], "default": "json"},
+                                        "language": {"type": "string", "description": "Language code (e.g., en, es, fr)"},
+                                        "prompt": {"type": "string", "description": "Optional prompt to guide transcription"},
+                                        "temperature": {"type": "number", "description": "Sampling temperature (0-1)"}
+                                    },
+                                    "required": ["file"]
+                                }
+                            }
+                        },
+                        "required": True
+                    },
+                    "responses": {
+                        "200": {
+                            "description": "Transcription result",
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "text": {"type": "string"}
+                                        }
+                                    }
+                                },
+                                "text/plain": {
+                                    "schema": {"type": "string"}
+                                }
+                            }
+                        },
+                        "400": {"description": "Bad request (no file provided)"},
+                        "500": {"description": "Server error (model load or transcription failure)"}
                     }
                 }
             },
