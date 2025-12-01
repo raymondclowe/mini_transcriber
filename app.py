@@ -242,9 +242,14 @@ def favicon():
     return ('', 204)
 
 
-if __name__ == '__main__':
+def run_server():
+    """Entry point for the server, used by uvx."""
     import os
     port = int(os.environ.get('PORT', '8080'))
     host = os.environ.get('HOST', '0.0.0.0')
     print(f"Starting app on {host}:{port}")
     app.run(host=host, port=port)
+
+
+if __name__ == '__main__':
+    run_server()

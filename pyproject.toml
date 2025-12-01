@@ -1,7 +1,7 @@
 [project]
 name = "mini-transcriber"
 version = "0.1.0"
-description = "Add your description here"
+description = "Minimal CPU-only transcription service using Whisper"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -23,6 +23,22 @@ dependencies = [
     "transformers==4.35.0",
     "whisper>=1.1.10",
 ]
+
+[project.scripts]
+mini-transcriber = "main:main"
+mini-transcriber-cli = "cli:main"
+mini-transcriber-server = "app:run_server"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]
+only-include = ["main.py", "cli.py", "app.py", "download_model.py", "transcribe_demo.py"]
+
+[tool.uv]
+index-strategy = "unsafe-best-match"
 
 [[tool.uv.index]]
 url = "https://download.pytorch.org/whl/cpu"

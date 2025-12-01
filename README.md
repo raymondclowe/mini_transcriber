@@ -8,6 +8,27 @@ Credits
 -------
 This is based on work from the original repository: https://github.com/DakeQQ/Transcribe-and-Translate-Subtitles — this mini-repo is intentionally minimal and not a drop-in replacement for the full project.
 
+Run directly with uvx (fastest)
+-------------------------------
+
+If you have `uv` installed, you can run the transcription server directly from GitHub without cloning:
+
+```bash
+# Run the server directly from GitHub
+uvx --from git+https://github.com/raymondclowe/mini_transcriber mini-transcriber-server
+
+# Run the CLI (requires PortAudio for mic recording)
+uvx --from git+https://github.com/raymondclowe/mini_transcriber mini-transcriber-cli path/to/audio.wav
+
+# Just print hello (test entry point)
+uvx --from git+https://github.com/raymondclowe/mini_transcriber mini-transcriber
+```
+
+Available commands:
+- `mini-transcriber` — prints hello (test that install works)
+- `mini-transcriber-cli` — transcribe audio files or record from microphone
+- `mini-transcriber-server` — start the Flask transcription server
+
 Quick start
 -----------
 
