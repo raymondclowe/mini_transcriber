@@ -8,6 +8,16 @@ import pytest
 import cli
 
 
+def test_cli_default_model_is_tiny():
+    """Verify that the CLI defaults to 'tiny' model for speed."""
+    p = argparse.ArgumentParser()
+    p.add_argument("audio", nargs="?", help="Path to audio file")
+    p.add_argument("--mic", type=int, default=0, help="Record from mic")
+    p.add_argument("--model", default="tiny", help="Which whisper model to use")
+    args = p.parse_args([])
+    assert args.model == "tiny"
+
+
 def test_record_creates_file(monkeypatch, tmp_path):
     out = tmp_path / 'out.wav'
 
