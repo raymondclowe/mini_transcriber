@@ -178,7 +178,9 @@ if ($uvFound) {
 
 Write-Host "`n=== Setup Complete ===" -ForegroundColor Cyan
 Write-Host "Next steps:" -ForegroundColor White
-Write-Host "  1. Download model: uv run python download_model.py --model tiny" -ForegroundColor White
-Write-Host "     (or: python download_model.py --model tiny if using venv)" -ForegroundColor White
-Write-Host "  2. Run CLI: uv run python cli.py path/to/audio.wav" -ForegroundColor White
-Write-Host "  3. Run server: uv run python app.py" -ForegroundColor White
+Write-Host "  1. Run CLI: uv run python cli.py path/to/audio.wav" -ForegroundColor White
+Write-Host "     (The tiny model will auto-download on first use)" -ForegroundColor Gray
+Write-Host "  2. Run server: uv run python app.py" -ForegroundColor White
+Write-Host "" -ForegroundColor White
+Write-Host "Optional: Pre-download models to avoid download time during first use:" -ForegroundColor Gray
+Write-Host "  uv run python download_model.py --model tiny" -ForegroundColor Gray
