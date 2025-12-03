@@ -30,20 +30,21 @@ def test_load_model_auto_downloads(monkeypatch):
         called_with.append(model_name)
         return FakeModel()
     
-    # Clear the model cache to test fresh load
-    import app as app_module
-    app_module.model_cache.clear()
-    
+    # Use monkeypatch to provide a clean model_cache dict for this test
+    test_cache = {}
+    monkeypatch.setattr('app.model_cache', test_cache)
     monkeypatch.setattr('app.whisper.load_model', fake_whisper_load)
     
     # Test default model
     model = load_model()
     assert called_with == ["tiny"]
+    assert "tiny" in test_cache
     
     # Test explicit model
     called_with.clear()
     model = load_model("base")
     assert called_with == ["base"]
+    assert "base" in test_cache
 
 
 def test_transcribe_no_file(client):
