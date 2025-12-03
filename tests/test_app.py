@@ -27,7 +27,7 @@ def test_load_model_auto_downloads(monkeypatch):
     def fake_whisper_load(model_name):
         return FakeModel()
     
-    # Use monkeypatch to provide a clean model_cache dict for this test
+    # Use monkeypatch to isolate model_cache from other tests
     test_cache = {}
     monkeypatch.setattr('app.model_cache', test_cache)
     monkeypatch.setattr('app.whisper.load_model', fake_whisper_load)
