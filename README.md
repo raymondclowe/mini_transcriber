@@ -56,7 +56,7 @@ setup.bat
 
 For CPU-only install (default), the script installs minimal dependencies. Set `$env:INSTALL_FULL="1"` before running for full GPU-capable install.
 
-Then download model assets (tiny) and run the CLI.
+**Note:** Models auto-download on first use. The tiny model (fastest, default) will download automatically when you first run the CLI or server. You can optionally pre-download models to avoid download time during first use.
 
 If you have the project's `uv` helper installed, prefer it:
 
@@ -64,9 +64,11 @@ If you have the project's `uv` helper installed, prefer it:
 # Install deps from requirements.txt
 uv add -r requirements.txt
 
-# Download model and run the CLI
-uv run python download_model.py --model tiny
+# Run the CLI (tiny model auto-downloads on first use)
 uv run python cli.py path/to/audio.wav
+
+# Optional: Pre-download model to avoid download time during first use
+uv run python download_model.py --model tiny
 ```
 
 If you don't have `uv` available, use the venv + pip fallback shown below:
@@ -74,15 +76,21 @@ If you don't have `uv` available, use the venv + pip fallback shown below:
 ```bash
 # Linux/macOS
 source venv/bin/activate
-python download_model.py --model tiny
+# Run the CLI (tiny model auto-downloads on first use)
 python cli.py path/to/audio.wav
+
+# Optional: Pre-download model
+python download_model.py --model tiny
 ```
 
 ```powershell
 # Windows (PowerShell)
 .\venv\Scripts\Activate.ps1
-python download_model.py --model tiny
+# Run the CLI (tiny model auto-downloads on first use)
 python cli.py path\to\audio.wav
+
+# Optional: Pre-download model
+python download_model.py --model tiny
 ```
 
 Run the Flask server with `uv` or the venv fallback:
@@ -264,7 +272,7 @@ What it includes
 - `setup.ps1` — Windows PowerShell setup script (equivalent to setup.sh).
 - `setup.bat` — Windows batch file wrapper for setup.ps1.
 - `requirements.txt` — CPU-friendly dependencies.
-- `download_model.py` — helper to download small whisper model files to a local model cache.
+- `download_model.py` — optional helper to pre-download whisper models. Models auto-download on first use, so this is only needed to avoid download time during initial run.
 - `cli.py` — transcribe local audio or system microphone (requires `sounddevice` for mic capture).
 - `app.py` — Flask server with POST /transcribe to accept file uploads and return JSON text and timings.
 

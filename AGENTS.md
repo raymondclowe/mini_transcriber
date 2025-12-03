@@ -1,5 +1,9 @@
-- be consise; less prose, more bullet points. 
-- Sacrafice grammer and politeness of briefness and clarity.
-- Save important learnings into LEARNINGS.md to avoid reinventing the wheel or making same mistakes repeatedly
-- Check LEARNINGS.md before asking for help or searching online
+- YOU HAVE AMNESIA! CHECK YOUR MEMORIES!
+- Be brief, use bullet points instead of paragraphs
+- Be precise, only change what needs to be changed
+- Don't be lazy, just keep working, when the choices are obvious just go ahead
+- Create a .private folder with a MY-MEMORIES.md to save your memories and add to them as you go along so you can defeat your amnesia
+- Make good use of git, to small atomic well described commits
+- Save your learnings (solutions to problems where you tried multiple ways before getting it right) into .private\LEARNINGS.md and reference that when you have problems in future
 - lets switch to using 'uv run' 'uv add' instead of python / pip
+- improve this AGENTS.md when you see the oppotunity

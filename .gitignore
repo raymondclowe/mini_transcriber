@@ -6,3 +6,4 @@ tmp_*.wav
 *.m4a
 dist/
 *.egg-info/
+.private/

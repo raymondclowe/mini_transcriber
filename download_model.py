@@ -1,6 +1,10 @@
-"""Download a small whisper model into a local cache directory.
+"""Pre-download whisper models (optional).
 
-This script uses the `whisper` package's model download to ensure the tiny/base models are cached locally.
+NOTE: This script is OPTIONAL. Whisper models are automatically downloaded on first use.
+The tiny model is the default and will auto-download when needed.
+
+This script can be used to pre-download models if you want to avoid download time during first use,
+or to ensure models are cached before going offline.
 """
 import argparse
 import whisper
