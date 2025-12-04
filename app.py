@@ -49,7 +49,10 @@ def transcribe():
         payload = request.get_json(silent=True) or {}
         model_name = payload.get('model')
     if not model_name:
-        model_name = DEFAULT_MODEL
+        model_name = request.form.get('model') or DEFAULT_MODEL
+
+    language = request.args.get('language') or request.form.get('language')
+    initial_prompt = request.form.get('initial_prompt')  # ADD THIS LINE
 
     if 'file' in request.files:
         f = request.files['file']
@@ -61,6 +64,7 @@ def transcribe():
         b64 = None
         mimetype = None
         filename = None
+        initial_prompt = None
         if request.is_json:
             payload = request.get_json(silent=True) or {}
             # Also support JSON body with 'language' field
@@ -71,6 +75,12 @@ def transcribe():
             b64 = payload.get('b64') or payload.get('audio')
             mimetype = payload.get('mimetype')
             filename = payload.get('filename')
+<<<<<<< HEAD
+=======
+            initial_prompt = payload.get('initial_prompt')
+            if not language:
+                language = payload.get('language')
+>>>>>>> 3c99b3b (Enhance transcribe function: support initial prompt and improve model selection logic)
         if not b64:
             b64 = request.form.get('b64') or request.form.get('audio')
             mimetype = mimetype or request.form.get('mimetype')
@@ -105,7 +115,7 @@ def transcribe():
             file_path = tf.name
 
     if not file_path:
-        return jsonify({"error": "no file provided"}), 400
+                initial_prompt = None
 
     # Load requested model (cache in memory)
     try:
@@ -114,11 +124,19 @@ def transcribe():
         return jsonify({"error": f"failed to load model '{model_name}': {e}"}), 500
 
     start = time.time()
+<<<<<<< HEAD
     result = model.transcribe(file_path, language=language)
-    end = time.time()
-
-    return jsonify({
-        "text": result.get('text',''),
+                    initial_prompt = payload.get('initial_prompt')
+        'language': language if language else 'en',
+        'fp16': False,  # CPU doesn't support fp16
+        'best_of': 1,    # Default 5, reduces candidates
+        'condition_on_previous_text': False  # Faster for short clips
+    }
+    if initial_prompt:
+        transcribe_kwargs['initial_prompt'] = initial_prompt
+    result = model.transcribe(file_path, **transcribe_kwargs)
+>>>>>>> 3c99b3b (Enhance transcribe function: support initial prompt and improve model selection logic)
+    start = time.time()
         "duration_s": end - start,
         "model": model_name,
         "language": language
@@ -129,7 +147,6 @@ def format_timestamp(seconds):
     """Format seconds as HH:MM:SS,mmm for SRT or HH:MM:SS.mmm for VTT."""
     hours = int(seconds // 3600)
     minutes = int((seconds % 3600) // 60)
-    secs = int(seconds % 60)
     millis = int((seconds % 1) * 1000)
     return hours, minutes, secs, millis
 
