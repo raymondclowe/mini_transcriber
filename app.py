@@ -121,10 +121,16 @@ def transcribe():
         return jsonify({"error": f"failed to load model '{model_name}': {e}"}), 500
 
     start = time.time()
+    transcribe_kwargs = {
+        'language': language if language else 'en',
+        'fp16': False,
+        'beam_size': 1,
+        'best_of': 1,
+        'condition_on_previous_text': False
+    }
     if initial_prompt:
-        result = model.transcribe(file_path, language=language if language else 'en', initial_prompt=initial_prompt)
-    else:
-        result = model.transcribe(file_path, language=language if language else 'en')
+        transcribe_kwargs['initial_prompt'] = initial_prompt
+    result = model.transcribe(file_path, **transcribe_kwargs)
     end = time.time()
 
     return jsonify({

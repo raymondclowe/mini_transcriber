@@ -20,7 +20,7 @@ def test_transcribe_no_file(client):
 
 def test_transcribe_with_model_and_language(client, monkeypatch):
     class MockModel:
-        def transcribe(self, file_path, language='en'):
+        def transcribe(self, file_path, language='en', **kwargs):
             return {'text': f'Transcribed in {language}'}
 
     monkeypatch.setattr('app.load_model', lambda model_name: MockModel())
