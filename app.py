@@ -114,7 +114,7 @@ def transcribe():
         return jsonify({"error": f"failed to load model '{model_name}': {e}"}), 500
 
     start = time.time()
-    result = model.transcribe(file_path)
+    result = model.transcribe(file_path, language=language)
     end = time.time()
 
     return jsonify({

@@ -1,6 +1,7 @@
 import pytest
 import sys
 import os
+import io
 from app import app
 
 # Ensure the project root is in sys.path
@@ -25,7 +26,7 @@ def test_transcribe_with_model_and_language(client, monkeypatch):
     monkeypatch.setattr('app.load_model', lambda model_name: MockModel())
 
     data = {
-        'file': (pytest.lazy_fixture('tmp_file'), 'test.wav'),
+        'file': (io.BytesIO(b'RIFF....WAVEfmt '), 'test.wav'),
         'model': 'tiny',
         'language': 'fr'
     }

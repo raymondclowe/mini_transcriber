@@ -51,7 +51,7 @@ def test_transcribe_no_file(client):
 def test_transcribe_success(client, monkeypatch, tmp_path):
     # monkeypatch the load_model function to return a fake model
     class FakeModel:
-        def transcribe(self, path):
+        def transcribe(self, path, language='en'):
             assert os.path.exists(path)
             return {"text": "hello from fake model"}
 
