@@ -21,7 +21,6 @@ DEFAULT_MODEL = "tiny"
 # Concurrency control settings (configurable via environment variables)
 MAX_CONCURRENT_TRANSCRIPTIONS = int(os.environ.get('MAX_CONCURRENT_TRANSCRIPTIONS', '1'))
 MAX_QUEUE_SIZE = int(os.environ.get('MAX_QUEUE_SIZE', '5'))
-ESTIMATED_TIME_PER_SECOND_AUDIO = float(os.environ.get('ESTIMATED_TIME_PER_SECOND_AUDIO', '0.5'))
 
 
 @dataclass
@@ -88,6 +87,22 @@ class TranscriptionQueue:
         with self.jobs_lock:
             return self.jobs.get(job_id)
     
+    def cleanup_old_jobs(self, max_age_seconds: int = 3600):
+        """Remove completed jobs older than max_age_seconds (default: 1 hour)."""
+        now = datetime.now()
+        with self.jobs_lock:
+            jobs_to_remove = []
+            for job_id, job in self.jobs.items():
+                if job.status in ('complete', 'error') and job.completed_at:
+                    age = (now - job.completed_at).total_seconds()
+                    if age > max_age_seconds:
+                        jobs_to_remove.append(job_id)
+            
+            for job_id in jobs_to_remove:
+                del self.jobs[job_id]
+            
+            return len(jobs_to_remove)
+    
     def get_queue_status(self) -> Dict[str, Any]:
         """Get current queue status."""
         with self.jobs_lock:
@@ -140,6 +155,15 @@ class TranscriptionQueue:
                         }
                         self.jobs[job.job_id].status = 'complete'
                         self.jobs[job.job_id].completed_at = datetime.now()
+                
+                # Cleanup old jobs periodically (every 10th job completion)
+                if hasattr(self, '_cleanup_counter'):
+                    self._cleanup_counter += 1
+                else:
+                    self._cleanup_counter = 1
+                
+                if self._cleanup_counter % 10 == 0:
+                    self.cleanup_old_jobs()
                 
             except Exception as e:
                 # Update job with error
@@ -324,9 +348,10 @@ def transcribe():
         # Queue is full - return 503 with retry information
         queue_status = transcription_queue.get_queue_status()
         
-        # Estimate wait time based on queue position
-        # Assume average transcription time per job
-        estimated_wait = queue_status['queued_jobs'] * 30  # 30 seconds per job estimate
+        # Estimate wait time based on queue position and average transcription time
+        # Use configured estimate or default to 30 seconds per job
+        avg_time_per_job = int(os.environ.get('AVG_TRANSCRIPTION_TIME_SECONDS', '30'))
+        estimated_wait = queue_status['queued_jobs'] * avg_time_per_job
         retry_after = max(30, min(estimated_wait, 300))  # Between 30s and 5 minutes
         
         return jsonify({

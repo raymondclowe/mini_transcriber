@@ -4,7 +4,6 @@ Tests for concurrent transcription request handling.
 import io
 import time
 import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import pytest
 

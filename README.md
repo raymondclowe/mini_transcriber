@@ -305,8 +305,8 @@ export MAX_CONCURRENT_TRANSCRIPTIONS=1
 # Maximum queue size (default: 5)
 export MAX_QUEUE_SIZE=5
 
-# Estimated processing time per second of audio (default: 0.5)
-export ESTIMATED_TIME_PER_SECOND_AUDIO=0.5
+# Average transcription time per job in seconds, used for retry-after estimates (default: 30)
+export AVG_TRANSCRIPTION_TIME_SECONDS=30
 ```
 
 ### Usage
