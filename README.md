@@ -279,11 +279,120 @@ What it includes
 Limitations & next steps
 ------------------------
 - This is intentionally small and uses the openai/whisper PyTorch implementation on CPU for convenience. For production you may prefer onnxruntime or a GPU build.
-- You may want to add concurrency/queueing for real server use, and containerize with resource limits.
+- ~~You may want to add concurrency/queueing for real server use, and containerize with resource limits.~~ **✓ IMPLEMENTED** — See "Concurrency & Queue Management" section below.
+
+Concurrency & Queue Management
+------------------------------
+
+The transcription service now includes built-in concurrency control and queue management to handle multiple simultaneous requests gracefully:
+
+### Features
+
+- **Thread-safe queue**: Requests are queued and processed by a configurable number of worker threads
+- **Configurable limits**: Control concurrent transcriptions and queue size via environment variables
+- **Graceful degradation**: Returns `503 Service Busy` with retry information when the queue is full
+- **Both sync and async modes**: Support for immediate response (async) or wait-for-result (sync) operations
+- **Queue status monitoring**: Check queue status via the `/health` endpoint
+
+### Configuration
+
+Set these environment variables to tune the behavior:
+
+```bash
+# Maximum concurrent transcriptions (default: 1 for CPU-only setups)
+export MAX_CONCURRENT_TRANSCRIPTIONS=1
+
+# Maximum queue size (default: 5)
+export MAX_QUEUE_SIZE=5
+
+# Estimated processing time per second of audio (default: 0.5)
+export ESTIMATED_TIME_PER_SECOND_AUDIO=0.5
+```
+
+### Usage
+
+**Synchronous mode (default)**: Client waits for transcription to complete
+
+```bash
+curl -F "file=@audio.wav" http://127.0.0.1:8080/transcribe
+# Returns: {"text": "...", "duration_s": 1.23, ...}
+```
+
+**Asynchronous mode**: Get job ID immediately, poll for results
+
+```bash
+# Submit job
+curl -F "file=@audio.wav" "http://127.0.0.1:8080/transcribe?async=true"
+# Returns: {"job_id": "job_123_...", "status": "queued", ...}
+
+# Poll for status
+curl http://127.0.0.1:8080/transcribe/status/job_123_...
+# Returns: {"status": "processing|complete", "result": {...}}
+```
+
+**Queue full response**: When the service is busy
+
+```bash
+curl -F "file=@audio.wav" http://127.0.0.1:8080/transcribe
+# Returns 503 with:
+{
+  "error": "service_busy",
+  "message": "Transcription service is currently busy. Please try again later.",
+  "retry_after_seconds": 30,
+  "queue_status": {
+    "active_workers": 1,
+    "queued_jobs": 5,
+    "queue_capacity": 5
+  },
+  "backoff_strategy": {
+    "type": "exponential",
+    "initial_delay": 30,
+    "max_delay": 300,
+    "multiplier": 2
+  }
+}
+```
+
+### Monitoring
+
+Check queue status via `/health`:
+
+```bash
+curl http://127.0.0.1:8080/health
+# Returns:
+{
+  "status": "ok",
+  "model_loaded": true,
+  "loaded_models": ["tiny"],
+  "queue": {
+    "max_workers": 1,
+    "active_workers": 1,
+    "queued_jobs": 2,
+    "processing_jobs": 1,
+    "queue_size": 2,
+    "queue_capacity": 5
+  },
+  "concurrency": {
+    "max_concurrent_transcriptions": 1,
+    "max_queue_size": 5
+  }
+}
+```
+
+### Recommendations
+
+- **CPU-only setups**: Keep `MAX_CONCURRENT_TRANSCRIPTIONS=1` to avoid resource contention
+- **Multi-core with GPU**: Increase to 2-4 depending on available memory and GPU resources
+- **High-traffic scenarios**: Increase `MAX_QUEUE_SIZE` but be aware this increases memory usage
+- **Client implementation**: Implement exponential backoff when receiving 503 responses
 
 Recent changes (local development)
 ---------------------------------
 
+- **NEW**: Added thread-safe queue management for concurrent transcription requests with configurable limits
+- **NEW**: Added async transcription mode with job polling via `/transcribe/status/<job_id>`
+- **NEW**: Added 503 "service busy" responses with retry-after headers and exponential backoff recommendations
+- **NEW**: Enhanced `/health` endpoint to include queue status and concurrency metrics
 - Added a small browser UI at `/` (served from `static/index.html`) that records overlapping chunks, resamples to 8 kHz WAV in the browser, and POSTs them to `/transcribe` for naive stitched live transcription.
 - Added a `/health` endpoint to report whether the Whisper model has been loaded. Useful for service monitors.
 - The server will now respond to `/favicon.ico` (returns `static/favicon.ico` if present or 204 otherwise) to avoid 404 noise in browser devtools.
