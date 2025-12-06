@@ -51,6 +51,7 @@ class TranscriptionQueue:
         self.workers_lock = threading.Lock()
         self._next_job_id = 0
         self._job_id_lock = threading.Lock()
+        self._cleanup_counter = 0
         
         # Start worker threads
         self.workers = []
@@ -75,11 +76,17 @@ class TranscriptionQueue:
             transcribe_kwargs=transcribe_kwargs
         )
         
+        # Try to add to queue first - if it fails, don't add to jobs dict
+        try:
+            self.job_queue.put(job, block=False)
+        except Full:
+            # Queue is full, don't add to jobs dict
+            raise
+        
+        # Only add to jobs dict after successful queue insertion
         with self.jobs_lock:
             self.jobs[job_id] = job
         
-        # This will raise Full if queue is full
-        self.job_queue.put(job, block=False)
         return job
     
     def get_job(self, job_id: str) -> Optional[TranscriptionJob]:
@@ -157,11 +164,7 @@ class TranscriptionQueue:
                         self.jobs[job.job_id].completed_at = datetime.now()
                 
                 # Cleanup old jobs periodically (every 10th job completion)
-                if hasattr(self, '_cleanup_counter'):
-                    self._cleanup_counter += 1
-                else:
-                    self._cleanup_counter = 1
-                
+                self._cleanup_counter += 1
                 if self._cleanup_counter % 10 == 0:
                     self.cleanup_old_jobs()
                 
