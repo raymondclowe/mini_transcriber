@@ -59,16 +59,24 @@ def test_queue_full_returns_503(client, monkeypatch, fresh_queue):
     assert has_503, f"Expected at least one 503 response, got: {status_codes}"
     assert has_202, f"Expected at least one 202 response, got: {status_codes}"
     
-    # Check 503 response format
+    # Check 503 response format and enhanced error messages
     for result in results:
         if result.status_code == 503:
             json_data = result.json
             assert 'error' in json_data
             assert json_data['error'] == 'service_busy'
+            assert json_data.get('error_code') == 'QUEUE_FULL'
+            assert 'message' in json_data
             assert 'retry_after_seconds' in json_data
             assert 'queue_status' in json_data
             assert 'backoff_strategy' in json_data
+            assert 'troubleshooting' in json_data
+            assert 'api_reference' in json_data
             assert 'Retry-After' in result.headers
+            # Verify helpful fields in troubleshooting
+            assert 'immediate_actions' in json_data['troubleshooting']
+            assert 'for_developers' in json_data['troubleshooting']
+            assert 'for_administrators' in json_data['troubleshooting']
 
 
 def test_async_transcription(client, monkeypatch, fresh_queue):
@@ -144,10 +152,15 @@ def test_health_includes_queue_status(client, fresh_queue):
 
 
 def test_job_status_not_found(client):
-    """Test that querying non-existent job returns 404."""
+    """Test that querying non-existent job returns 404 with helpful error."""
     rv = client.get('/transcribe/status/nonexistent_job_123')
     assert rv.status_code == 404
     assert 'error' in rv.json
+    assert rv.json.get('error') == 'job_not_found'
+    assert rv.json.get('error_code') == 'NOT_FOUND'
+    assert 'message' in rv.json
+    assert 'troubleshooting' in rv.json
+    assert 'api_reference' in rv.json
 
 
 def test_concurrent_requests_controlled(client, monkeypatch, fresh_queue):

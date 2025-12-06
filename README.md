@@ -386,9 +386,36 @@ curl http://127.0.0.1:8080/health
 - **High-traffic scenarios**: Increase `MAX_QUEUE_SIZE` but be aware this increases memory usage
 - **Client implementation**: Implement exponential backoff when receiving 503 responses
 
+### Stress Testing
+
+A comprehensive stress testing harness is included to help tune configuration for your hardware:
+
+```bash
+# Install dependencies
+pip install psutil requests
+
+# Run stress test with defaults
+python tests/stress_test.py
+
+# Custom test parameters
+python tests/stress_test.py --workers 20 --duration 60 --output report.json
+```
+
+The stress test will:
+- ✅ Monitor CPU and RAM usage in real-time
+- ✅ Generate detailed performance reports
+- ✅ Provide hardware-specific configuration recommendations
+- ✅ Test both sync and async modes
+- ✅ Help identify optimal settings for your deployment
+
+See [tests/STRESS_TESTING.md](tests/STRESS_TESTING.md) for complete documentation.
+
 Recent changes (local development)
 ---------------------------------
 
+- **NEW**: Added comprehensive stress testing harness with CPU/RAM monitoring and hardware-specific recommendations
+- **NEW**: Enhanced error messages with detailed troubleshooting guidance for developers and administrators
+- **NEW**: All error responses now include error_code, message, details, troubleshooting, and api_reference fields
 - **NEW**: Added thread-safe queue management for concurrent transcription requests with configurable limits
 - **NEW**: Added async transcription mode with job polling via `/transcribe/status/<job_id>`
 - **NEW**: Added 503 "service busy" responses with retry-after headers and exponential backoff recommendations

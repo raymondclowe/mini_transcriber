@@ -280,8 +280,22 @@ def transcribe():
 
             try:
                 raw = base64.b64decode(b64)
-            except Exception:
-                return jsonify({"error": "invalid base64 payload"}), 400
+            except Exception as e:
+                return jsonify({
+                    "error": "invalid_base64",
+                    "error_code": "INVALID_INPUT",
+                    "message": "The provided base64 audio data is invalid and cannot be decoded.",
+                    "details": {
+                        "error_type": type(e).__name__,
+                        "error_message": str(e)
+                    },
+                    "troubleshooting": [
+                        "Ensure the base64 string is properly encoded",
+                        "Check for any special characters or line breaks",
+                        "Use standard base64 encoding (not base64url)",
+                        "Example: base64.b64encode(audio_bytes).decode('utf-8')"
+                    ]
+                }), 400
 
             # Determine extension from mimetype or filename
             ext = '.wav'
@@ -300,7 +314,29 @@ def transcribe():
             file_path = tf.name
 
     if not file_path:
-        return jsonify({"error": "no file provided"}), 400
+        return jsonify({
+            "error": "no_file_provided",
+            "error_code": "MISSING_INPUT",
+            "message": "No audio file was provided in the request.",
+            "details": {
+                "accepted_methods": [
+                    "multipart/form-data with 'file' field",
+                    "JSON with 'b64' field containing base64-encoded audio",
+                    "form field 'b64' with base64 string"
+                ]
+            },
+            "examples": {
+                "curl_file_upload": "curl -F 'file=@audio.wav' http://localhost:8080/transcribe",
+                "curl_base64_json": "curl -H 'Content-Type: application/json' -d '{\"b64\":\"<base64-data>\"}' http://localhost:8080/transcribe",
+                "curl_data_uri": "curl -H 'Content-Type: application/json' -d '{\"b64\":\"data:audio/wav;base64,<data>\"}' http://localhost:8080/transcribe"
+            },
+            "troubleshooting": [
+                "Ensure you're using POST method",
+                "Check Content-Type header is set correctly",
+                "Verify field name is 'file' for multipart or 'b64' for JSON",
+                "See API documentation for complete examples"
+            ]
+        }), 400
 
     # Build transcription kwargs
     transcribe_kwargs = {
@@ -333,19 +369,66 @@ def transcribe():
         while elapsed < max_wait_time:
             current_job = transcription_queue.get_job(job.job_id)
             if not current_job:
-                return jsonify({"error": "job not found"}), 500
+                return jsonify({
+                    "error": "job_lost",
+                    "error_code": "INTERNAL_ERROR",
+                    "message": "Job was submitted but cannot be found in the queue. This may indicate a system error.",
+                    "details": {
+                        "job_id": job.job_id,
+                        "elapsed_time": elapsed
+                    },
+                    "troubleshooting": [
+                        "This is an unexpected error - please contact administrator",
+                        "Check /health endpoint for system status",
+                        "Try submitting the request again"
+                    ]
+                }), 500
             
             if current_job.status == 'complete':
                 return jsonify(current_job.result), 200
             
             if current_job.status == 'error':
-                return jsonify({"error": current_job.error}), 500
+                return jsonify({
+                    "error": "transcription_failed",
+                    "error_code": "PROCESSING_ERROR",
+                    "message": "Transcription failed during processing.",
+                    "details": {
+                        "job_id": job.job_id,
+                        "error_message": current_job.error,
+                        "model": model_name,
+                        "language": language
+                    },
+                    "troubleshooting": [
+                        "Check if the audio file is valid and not corrupted",
+                        "Ensure the audio format is supported (WAV, MP3, M4A, etc.)",
+                        "Try with a different model if the error persists",
+                        "Check service logs for detailed error information"
+                    ]
+                }), 500
             
             time.sleep(poll_interval)
             elapsed += poll_interval
         
         # Timeout
-        return jsonify({"error": "transcription timeout"}), 504
+        return jsonify({
+            "error": "transcription_timeout",
+            "error_code": "TIMEOUT",
+            "message": "Transcription request timed out after waiting 5 minutes. The service may be overloaded.",
+            "details": {
+                "max_wait_time_seconds": 300,
+                "job_id": job.job_id,
+                "current_status": current_job.status if current_job else "unknown"
+            },
+            "troubleshooting": {
+                "suggestions": [
+                    "Try again with async mode (?async=true) to avoid timeout",
+                    "Check /health endpoint to see current queue status",
+                    "Contact administrator if timeouts persist"
+                ],
+                "health_endpoint": "/health",
+                "async_mode_example": f"/transcribe?async=true"
+            }
+        }), 504
         
     except Full:
         # Queue is full - return 503 with retry information
@@ -359,18 +442,47 @@ def transcribe():
         
         return jsonify({
             "error": "service_busy",
-            "message": "Transcription service is currently busy. Please try again later.",
+            "error_code": "QUEUE_FULL",
+            "message": "Transcription service is currently busy. All worker threads are occupied and the queue is full.",
             "retry_after_seconds": retry_after,
             "queue_status": {
                 "active_workers": queue_status['active_workers'],
+                "max_workers": queue_status['max_workers'],
                 "queued_jobs": queue_status['queued_jobs'],
-                "queue_capacity": queue_status['queue_capacity']
+                "queue_capacity": queue_status['queue_capacity'],
+                "queue_full": True
             },
             "backoff_strategy": {
                 "type": "exponential",
-                "initial_delay": 30,
-                "max_delay": 300,
-                "multiplier": 2
+                "description": "Use exponential backoff: wait longer after each retry",
+                "initial_delay_seconds": 30,
+                "max_delay_seconds": 300,
+                "multiplier": 2,
+                "example": "Wait 30s, then 60s, then 120s, then 240s, then 300s max"
+            },
+            "troubleshooting": {
+                "immediate_actions": [
+                    f"Wait {retry_after} seconds before retrying (see Retry-After header)",
+                    "Check /health endpoint to monitor queue status",
+                    "Consider using async mode (?async=true) if supported by your client"
+                ],
+                "for_developers": [
+                    "Implement exponential backoff in your client",
+                    "Monitor queue_status in this response",
+                    "Consider batching requests during off-peak hours"
+                ],
+                "for_administrators": [
+                    f"Current MAX_CONCURRENT_TRANSCRIPTIONS: {MAX_CONCURRENT_TRANSCRIPTIONS}",
+                    f"Current MAX_QUEUE_SIZE: {MAX_QUEUE_SIZE}",
+                    "Consider increasing MAX_QUEUE_SIZE if rejections are frequent",
+                    "Consider increasing MAX_CONCURRENT_TRANSCRIPTIONS if CPU allows",
+                    "Run stress tests to optimize for your hardware: python tests/stress_test.py"
+                ]
+            },
+            "api_reference": {
+                "health_check": "/health",
+                "async_mode": "/transcribe?async=true",
+                "job_status": "/transcribe/status/<job_id>"
             }
         }), 503, {'Retry-After': str(retry_after)}
 
@@ -381,7 +493,29 @@ def transcribe_status(job_id):
     job = transcription_queue.get_job(job_id)
     
     if not job:
-        return jsonify({"error": "job not found"}), 404
+        return jsonify({
+            "error": "job_not_found",
+            "error_code": "NOT_FOUND",
+            "message": f"No job found with ID '{job_id}'.",
+            "details": {
+                "job_id": job_id,
+                "possible_reasons": [
+                    "Job ID is incorrect or expired",
+                    "Job was completed more than 1 hour ago and has been cleaned up",
+                    "Job was never created (check initial submit response)"
+                ]
+            },
+            "troubleshooting": [
+                "Verify the job_id from the initial POST /transcribe?async=true response",
+                "Check if more than 1 hour has passed since job completion",
+                "Submit a new transcription request to get a fresh job_id",
+                "Jobs are cleaned up 1 hour after completion to prevent memory leaks"
+            ],
+            "api_reference": {
+                "submit_job": "POST /transcribe?async=true",
+                "check_health": "GET /health"
+            }
+        }), 404
     
     response = {
         "job_id": job.job_id,
