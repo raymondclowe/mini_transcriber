@@ -7,3 +7,5 @@ sounddevice==0.4.6
 numpy==1.26.4
 transformers==4.35.0
 sentencepiece==0.1.99
+psutil==5.9.8
+requests==2.31.0

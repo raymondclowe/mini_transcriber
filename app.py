@@ -6,11 +6,195 @@ import base64
 import re
 import tempfile
 import mimetypes
+import os
+import threading
+from queue import Queue, Full
+from dataclasses import dataclass, field
+from typing import Optional, Dict, Any
+from datetime import datetime
 
 app = Flask(__name__)
 # Model cache: {model_name: model_obj}
 model_cache = {}
 DEFAULT_MODEL = "tiny"
+
+# Concurrency control settings (configurable via environment variables)
+MAX_CONCURRENT_TRANSCRIPTIONS = int(os.environ.get('MAX_CONCURRENT_TRANSCRIPTIONS', '1'))
+MAX_QUEUE_SIZE = int(os.environ.get('MAX_QUEUE_SIZE', '5'))
+
+
+@dataclass
+class TranscriptionJob:
+    """Represents a transcription job in the queue."""
+    job_id: str
+    file_path: str
+    model_name: str
+    transcribe_kwargs: Dict[str, Any]
+    result: Optional[Dict[str, Any]] = None
+    error: Optional[str] = None
+    status: str = 'queued'  # queued, processing, complete, error
+    queued_at: datetime = field(default_factory=datetime.now)
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+
+
+class TranscriptionQueue:
+    """Thread-safe queue manager for transcription jobs."""
+    
+    def __init__(self, max_workers=1, max_queue_size=5):
+        self.max_workers = max_workers
+        self.max_queue_size = max_queue_size
+        self.job_queue = Queue(maxsize=max_queue_size)
+        self.jobs: Dict[str, TranscriptionJob] = {}
+        self.jobs_lock = threading.Lock()
+        self.active_workers = 0
+        self.workers_lock = threading.Lock()
+        self._next_job_id = 0
+        self._job_id_lock = threading.Lock()
+        self._cleanup_counter = 0
+        
+        # Start worker threads
+        self.workers = []
+        for i in range(max_workers):
+            worker = threading.Thread(target=self._worker, daemon=True, name=f"TranscriptionWorker-{i}")
+            worker.start()
+            self.workers.append(worker)
+    
+    def _generate_job_id(self) -> str:
+        """Generate a unique job ID."""
+        with self._job_id_lock:
+            self._next_job_id += 1
+            return f"job_{self._next_job_id}_{int(time.time()*1000)}"
+    
+    def submit_job(self, file_path: str, model_name: str, transcribe_kwargs: Dict[str, Any]) -> TranscriptionJob:
+        """Submit a transcription job. Raises Full if queue is full."""
+        job_id = self._generate_job_id()
+        job = TranscriptionJob(
+            job_id=job_id,
+            file_path=file_path,
+            model_name=model_name,
+            transcribe_kwargs=transcribe_kwargs
+        )
+        
+        # Try to add to queue first - if it fails, don't add to jobs dict
+        try:
+            self.job_queue.put(job, block=False)
+        except Full:
+            # Queue is full, don't add to jobs dict
+            raise
+        
+        # Only add to jobs dict after successful queue insertion
+        with self.jobs_lock:
+            self.jobs[job_id] = job
+        
+        return job
+    
+    def get_job(self, job_id: str) -> Optional[TranscriptionJob]:
+        """Get a job by ID."""
+        with self.jobs_lock:
+            return self.jobs.get(job_id)
+    
+    def cleanup_old_jobs(self, max_age_seconds: int = 3600):
+        """Remove completed jobs older than max_age_seconds (default: 1 hour)."""
+        now = datetime.now()
+        with self.jobs_lock:
+            jobs_to_remove = []
+            for job_id, job in self.jobs.items():
+                if job.status in ('complete', 'error') and job.completed_at:
+                    age = (now - job.completed_at).total_seconds()
+                    if age > max_age_seconds:
+                        jobs_to_remove.append(job_id)
+            
+            for job_id in jobs_to_remove:
+                del self.jobs[job_id]
+            
+            return len(jobs_to_remove)
+    
+    def get_queue_status(self) -> Dict[str, Any]:
+        """Get current queue status."""
+        with self.jobs_lock:
+            queued = sum(1 for j in self.jobs.values() if j.status == 'queued')
+            processing = sum(1 for j in self.jobs.values() if j.status == 'processing')
+        
+        with self.workers_lock:
+            active = self.active_workers
+        
+        return {
+            'max_workers': self.max_workers,
+            'active_workers': active,
+            'queued_jobs': queued,
+            'processing_jobs': processing,
+            'queue_size': self.job_queue.qsize(),
+            'queue_capacity': self.max_queue_size
+        }
+    
+    def _worker(self):
+        """Worker thread that processes jobs from the queue."""
+        while True:
+            job = self.job_queue.get()
+            if job is None:  # Shutdown signal
+                break
+            
+            try:
+                with self.workers_lock:
+                    self.active_workers += 1
+                
+                # Update job status
+                with self.jobs_lock:
+                    if job.job_id in self.jobs:
+                        self.jobs[job.job_id].status = 'processing'
+                        self.jobs[job.job_id].started_at = datetime.now()
+                
+                # Load model and transcribe
+                model = load_model(job.model_name)
+                start_time = time.time()
+                result = model.transcribe(job.file_path, **job.transcribe_kwargs)
+                end_time = time.time()
+                
+                # Update job with result
+                with self.jobs_lock:
+                    if job.job_id in self.jobs:
+                        self.jobs[job.job_id].result = {
+                            'text': result.get('text', ''),
+                            'duration_s': end_time - start_time,
+                            'model': job.model_name,
+                            'language': job.transcribe_kwargs.get('language', 'en')
+                        }
+                        self.jobs[job.job_id].status = 'complete'
+                        self.jobs[job.job_id].completed_at = datetime.now()
+                
+                # Cleanup old jobs periodically (every 10th job completion)
+                self._cleanup_counter += 1
+                if self._cleanup_counter % 10 == 0:
+                    self.cleanup_old_jobs()
+                
+            except Exception as e:
+                # Update job with error
+                with self.jobs_lock:
+                    if job.job_id in self.jobs:
+                        self.jobs[job.job_id].error = str(e)
+                        self.jobs[job.job_id].status = 'error'
+                        self.jobs[job.job_id].completed_at = datetime.now()
+            
+            finally:
+                with self.workers_lock:
+                    self.active_workers -= 1
+                
+                self.job_queue.task_done()
+    
+    def shutdown(self):
+        """Shutdown the queue and all workers."""
+        for _ in self.workers:
+            self.job_queue.put(None)
+        for worker in self.workers:
+            worker.join()
+
+
+# Initialize global transcription queue
+transcription_queue = TranscriptionQueue(
+    max_workers=MAX_CONCURRENT_TRANSCRIPTIONS,
+    max_queue_size=MAX_QUEUE_SIZE
+)
 
 
 
@@ -41,6 +225,10 @@ def transcribe():
     # 1) Multipart file upload (form-data) with key 'file' (existing behavior)
     # 2) JSON body with {'b64': '<base64 or data:<mime>;base64,...>'}
     # 3) Form-encoded field 'b64' with base64 string
+    
+    # Check if async mode is requested
+    async_mode = request.args.get('async', '').lower() in ('true', '1', 'yes')
+    
     file_path = None
     language = request.args.get('language') or request.form.get('language') or 'en'
     model_name = request.args.get('model') or request.form.get('model')
@@ -92,8 +280,22 @@ def transcribe():
 
             try:
                 raw = base64.b64decode(b64)
-            except Exception:
-                return jsonify({"error": "invalid base64 payload"}), 400
+            except Exception as e:
+                return jsonify({
+                    "error": "invalid_base64",
+                    "error_code": "INVALID_INPUT",
+                    "message": "The provided base64 audio data is invalid and cannot be decoded.",
+                    "details": {
+                        "error_type": type(e).__name__,
+                        "error_message": str(e)
+                    },
+                    "troubleshooting": [
+                        "Ensure the base64 string is properly encoded",
+                        "Check for any special characters or line breaks",
+                        "Use standard base64 encoding (not base64url)",
+                        "Example: base64.b64encode(audio_bytes).decode('utf-8')"
+                    ]
+                }), 400
 
             # Determine extension from mimetype or filename
             ext = '.wav'
@@ -112,15 +314,31 @@ def transcribe():
             file_path = tf.name
 
     if not file_path:
-        return jsonify({"error": "no file provided"}), 400
+        return jsonify({
+            "error": "no_file_provided",
+            "error_code": "MISSING_INPUT",
+            "message": "No audio file was provided in the request.",
+            "details": {
+                "accepted_methods": [
+                    "multipart/form-data with 'file' field",
+                    "JSON with 'b64' field containing base64-encoded audio",
+                    "form field 'b64' with base64 string"
+                ]
+            },
+            "examples": {
+                "curl_file_upload": "curl -F 'file=@audio.wav' http://localhost:8080/transcribe",
+                "curl_base64_json": "curl -H 'Content-Type: application/json' -d '{\"b64\":\"<base64-data>\"}' http://localhost:8080/transcribe",
+                "curl_data_uri": "curl -H 'Content-Type: application/json' -d '{\"b64\":\"data:audio/wav;base64,<data>\"}' http://localhost:8080/transcribe"
+            },
+            "troubleshooting": [
+                "Ensure you're using POST method",
+                "Check Content-Type header is set correctly",
+                "Verify field name is 'file' for multipart or 'b64' for JSON",
+                "See API documentation for complete examples"
+            ]
+        }), 400
 
-    # Load requested model (cache in memory)
-    try:
-        model = load_model(model_name)
-    except Exception as e:
-        return jsonify({"error": f"failed to load model '{model_name}': {e}"}), 500
-
-    start = time.time()
+    # Build transcription kwargs
     transcribe_kwargs = {
         'language': language if language else 'en',
         'fp16': False,
@@ -130,15 +348,192 @@ def transcribe():
     }
     if initial_prompt:
         transcribe_kwargs['initial_prompt'] = initial_prompt
-    result = model.transcribe(file_path, **transcribe_kwargs)
-    end = time.time()
+    
+    # Try to submit job to queue
+    try:
+        job = transcription_queue.submit_job(file_path, model_name, transcribe_kwargs)
+        
+        if async_mode:
+            # Return job ID for async polling
+            return jsonify({
+                "job_id": job.job_id,
+                "status": "queued",
+                "message": "Job queued for processing. Poll /transcribe/status/<job_id> for results."
+            }), 202
+        
+        # Synchronous mode: wait for completion
+        max_wait_time = 300  # 5 minutes max wait
+        poll_interval = 0.1  # 100ms polling
+        elapsed = 0.0
+        
+        while elapsed < max_wait_time:
+            current_job = transcription_queue.get_job(job.job_id)
+            if not current_job:
+                return jsonify({
+                    "error": "job_lost",
+                    "error_code": "INTERNAL_ERROR",
+                    "message": "Job was submitted but cannot be found in the queue. This may indicate a system error.",
+                    "details": {
+                        "job_id": job.job_id,
+                        "elapsed_time": elapsed
+                    },
+                    "troubleshooting": [
+                        "This is an unexpected error - please contact administrator",
+                        "Check /health endpoint for system status",
+                        "Try submitting the request again"
+                    ]
+                }), 500
+            
+            if current_job.status == 'complete':
+                return jsonify(current_job.result), 200
+            
+            if current_job.status == 'error':
+                return jsonify({
+                    "error": "transcription_failed",
+                    "error_code": "PROCESSING_ERROR",
+                    "message": "Transcription failed during processing.",
+                    "details": {
+                        "job_id": job.job_id,
+                        "error_message": current_job.error,
+                        "model": model_name,
+                        "language": language
+                    },
+                    "troubleshooting": [
+                        "Check if the audio file is valid and not corrupted",
+                        "Ensure the audio format is supported (WAV, MP3, M4A, etc.)",
+                        "Try with a different model if the error persists",
+                        "Check service logs for detailed error information"
+                    ]
+                }), 500
+            
+            time.sleep(poll_interval)
+            elapsed += poll_interval
+        
+        # Timeout
+        return jsonify({
+            "error": "transcription_timeout",
+            "error_code": "TIMEOUT",
+            "message": "Transcription request timed out after waiting 5 minutes. The service may be overloaded.",
+            "details": {
+                "max_wait_time_seconds": 300,
+                "job_id": job.job_id,
+                "current_status": current_job.status if current_job else "unknown"
+            },
+            "troubleshooting": {
+                "suggestions": [
+                    "Try again with async mode (?async=true) to avoid timeout",
+                    "Check /health endpoint to see current queue status",
+                    "Contact administrator if timeouts persist"
+                ],
+                "health_endpoint": "/health",
+                "async_mode_example": f"/transcribe?async=true"
+            }
+        }), 504
+        
+    except Full:
+        # Queue is full - return 503 with retry information
+        queue_status = transcription_queue.get_queue_status()
+        
+        # Estimate wait time based on queue position and average transcription time
+        # Use configured estimate or default to 30 seconds per job
+        avg_time_per_job = int(os.environ.get('AVG_TRANSCRIPTION_TIME_SECONDS', '30'))
+        estimated_wait = queue_status['queued_jobs'] * avg_time_per_job
+        retry_after = max(30, min(estimated_wait, 300))  # Between 30s and 5 minutes
+        
+        return jsonify({
+            "error": "service_busy",
+            "error_code": "QUEUE_FULL",
+            "message": "Transcription service is currently busy. All worker threads are occupied and the queue is full.",
+            "retry_after_seconds": retry_after,
+            "queue_status": {
+                "active_workers": queue_status['active_workers'],
+                "max_workers": queue_status['max_workers'],
+                "queued_jobs": queue_status['queued_jobs'],
+                "queue_capacity": queue_status['queue_capacity'],
+                "queue_full": True
+            },
+            "backoff_strategy": {
+                "type": "exponential",
+                "description": "Use exponential backoff: wait longer after each retry",
+                "initial_delay_seconds": 30,
+                "max_delay_seconds": 300,
+                "multiplier": 2,
+                "example": "Wait 30s, then 60s, then 120s, then 240s, then 300s max"
+            },
+            "troubleshooting": {
+                "immediate_actions": [
+                    f"Wait {retry_after} seconds before retrying (see Retry-After header)",
+                    "Check /health endpoint to monitor queue status",
+                    "Consider using async mode (?async=true) if supported by your client"
+                ],
+                "for_developers": [
+                    "Implement exponential backoff in your client",
+                    "Monitor queue_status in this response",
+                    "Consider batching requests during off-peak hours"
+                ],
+                "for_administrators": [
+                    f"Current MAX_CONCURRENT_TRANSCRIPTIONS: {MAX_CONCURRENT_TRANSCRIPTIONS}",
+                    f"Current MAX_QUEUE_SIZE: {MAX_QUEUE_SIZE}",
+                    "Consider increasing MAX_QUEUE_SIZE if rejections are frequent",
+                    "Consider increasing MAX_CONCURRENT_TRANSCRIPTIONS if CPU allows",
+                    "Run stress tests to optimize for your hardware: python tests/stress_test.py"
+                ]
+            },
+            "api_reference": {
+                "health_check": "/health",
+                "async_mode": "/transcribe?async=true",
+                "job_status": "/transcribe/status/<job_id>"
+            }
+        }), 503, {'Retry-After': str(retry_after)}
 
-    return jsonify({
-        "text": result.get('text',''),
-        "duration_s": end - start,
-        "model": model_name,
-        "language": language
-    })
+
+@app.route("/transcribe/status/<job_id>", methods=["GET"])
+def transcribe_status(job_id):
+    """Check the status of an async transcription job."""
+    job = transcription_queue.get_job(job_id)
+    
+    if not job:
+        return jsonify({
+            "error": "job_not_found",
+            "error_code": "NOT_FOUND",
+            "message": f"No job found with ID '{job_id}'.",
+            "details": {
+                "job_id": job_id,
+                "possible_reasons": [
+                    "Job ID is incorrect or expired",
+                    "Job was completed more than 1 hour ago and has been cleaned up",
+                    "Job was never created (check initial submit response)"
+                ]
+            },
+            "troubleshooting": [
+                "Verify the job_id from the initial POST /transcribe?async=true response",
+                "Check if more than 1 hour has passed since job completion",
+                "Submit a new transcription request to get a fresh job_id",
+                "Jobs are cleaned up 1 hour after completion to prevent memory leaks"
+            ],
+            "api_reference": {
+                "submit_job": "POST /transcribe?async=true",
+                "check_health": "GET /health"
+            }
+        }), 404
+    
+    response = {
+        "job_id": job.job_id,
+        "status": job.status,
+        "queued_at": job.queued_at.isoformat() if job.queued_at else None,
+        "started_at": job.started_at.isoformat() if job.started_at else None,
+        "completed_at": job.completed_at.isoformat() if job.completed_at else None
+    }
+    
+    if job.status == 'complete' and job.result:
+        response['result'] = job.result
+        return jsonify(response), 200
+    elif job.status == 'error':
+        response['error'] = job.error
+        return jsonify(response), 500
+    else:
+        # Still queued or processing
+        return jsonify(response), 202
 
 
 def format_timestamp(seconds):
@@ -285,13 +680,20 @@ def openai_transcribe():
 
 @app.route('/health', methods=['GET'])
 def health():
-    """Health endpoint reporting model status and basic process info."""
+    """Health endpoint reporting model status, queue status and basic process info."""
     # Report which models are loaded
     loaded_models = list(model_cache.keys())
+    queue_status = transcription_queue.get_queue_status()
+    
     return jsonify({
         'status': 'ok' if loaded_models else 'loading',
         'model_loaded': bool(loaded_models),
-        'loaded_models': loaded_models
+        'loaded_models': loaded_models,
+        'queue': queue_status,
+        'concurrency': {
+            'max_concurrent_transcriptions': MAX_CONCURRENT_TRANSCRIPTIONS,
+            'max_queue_size': MAX_QUEUE_SIZE
+        }
     })
 
 

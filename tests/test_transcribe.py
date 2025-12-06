@@ -16,7 +16,9 @@ def client():
 def test_transcribe_no_file(client):
     response = client.post('/transcribe')
     assert response.status_code == 400
-    assert response.json['error'] == 'no file provided'
+    assert response.json['error'] == 'no_file_provided'
+    assert 'error_code' in response.json
+    assert response.json['error_code'] == 'MISSING_INPUT'
 
 def test_transcribe_with_model_and_language(client, monkeypatch):
     class MockModel:

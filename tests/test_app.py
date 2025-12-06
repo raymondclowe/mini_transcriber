@@ -45,7 +45,10 @@ def test_load_model_auto_downloads(monkeypatch):
 def test_transcribe_no_file(client):
     rv = client.post('/transcribe', data={})
     assert rv.status_code == 400
-    assert rv.json.get('error') == 'no file provided'
+    assert rv.json.get('error') == 'no_file_provided'
+    assert rv.json.get('error_code') == 'MISSING_INPUT'
+    assert 'message' in rv.json
+    assert 'troubleshooting' in rv.json
 
 
 def test_transcribe_success(client, monkeypatch, tmp_path):
