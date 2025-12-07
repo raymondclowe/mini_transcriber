@@ -229,3 +229,34 @@ def test_openai_transcribe_invalid_temperature(client):
     rv = client.post('/v1/audio/transcriptions', data=data, content_type='multipart/form-data')
     assert rv.status_code == 400
     assert 'Invalid temperature' in rv.json.get('error', {}).get('message', '')
+
+
+def test_llm_txt_endpoint(client):
+    """Test /llm.txt endpoint returns markdown documentation."""
+    rv = client.get('/llm.txt')
+    assert rv.status_code == 200
+    assert rv.content_type == 'text/plain; charset=utf-8'
+    
+    content = rv.data.decode('utf-8')
+    
+    # Check for key documentation sections
+    assert '# mini_transcriber' in content
+    assert 'github.com/raymondclowe/mini_transcriber' in content
+    assert 'POST /transcribe' in content
+    assert 'GET /health' in content
+    assert '/v1/audio/transcriptions' in content
+    
+    # Check for API usage examples
+    assert 'curl' in content
+    assert 'python' in content.lower()
+    
+    # Check for configuration info
+    assert 'MAX_CONCURRENT_TRANSCRIPTIONS' in content
+    assert 'Environment Variables' in content
+    
+    # Check for error handling documentation
+    assert 'Error Handling' in content
+    assert 'error_code' in content
+    
+    # Check for best practices
+    assert 'Best Practices' in content

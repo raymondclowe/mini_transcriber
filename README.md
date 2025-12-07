@@ -413,6 +413,7 @@ See [tests/STRESS_TESTING.md](tests/STRESS_TESTING.md) for complete documentatio
 Recent changes (local development)
 ---------------------------------
 
+- **NEW**: Added `/llm.txt` endpoint providing comprehensive markdown documentation optimized for AI models and developers
 - **NEW**: Added comprehensive stress testing harness with CPU/RAM monitoring and hardware-specific recommendations
 - **NEW**: Enhanced error messages with detailed troubleshooting guidance for developers and administrators
 - **NEW**: All error responses now include error_code, message, details, troubleshooting, and api_reference fields
