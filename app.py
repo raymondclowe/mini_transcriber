@@ -697,6 +697,329 @@ def health():
     })
 
 
+@app.route('/llm.txt', methods=['GET'])
+def llm_txt():
+    """Return markdown documentation about mini_transcriber for AI models and developers.
+    
+    This follows the llm.txt convention - a standard for providing LLM-friendly
+    documentation at /llm.txt endpoint.
+    """
+    host = request.host_url.rstrip('/')
+    
+    llm_doc = f"""# mini_transcriber - AI Transcription Service
+
+> **Source**: https://github.com/raymondclowe/mini_transcriber
+
+## What is mini_transcriber?
+
+mini_transcriber is a minimal, CPU-optimized audio transcription service built on OpenAI's Whisper model. It's designed to be lightweight, easy to deploy, and fast for CPU-only environments.
+
+## Key Features
+
+- **CPU-Optimized**: Runs efficiently on CPU without requiring GPU
+- **Multiple Input Formats**: Supports file uploads, base64 encoded audio, and data URIs
+- **OpenAI Compatible**: Implements `/v1/audio/transcriptions` endpoint matching OpenAI's API
+- **Async & Sync Modes**: Choose between waiting for results or polling job status
+- **Queue Management**: Built-in concurrency control with configurable worker threads
+- **Multiple Output Formats**: JSON, text, SRT subtitles, and VTT subtitles
+
+## Quick Start
+
+### Using curl
+
+```bash
+# Simple file upload
+curl -F "file=@audio.wav" {host}/transcribe
+
+# With language specification
+curl -F "file=@audio.wav" "{host}/transcribe?language=es"
+
+# Base64 encoded audio (JSON)
+curl -H "Content-Type: application/json" \\
+  -d '{{"b64": "data:audio/wav;base64,<your-base64-data>"}}' \\
+  {host}/transcribe
+
+# Async mode (get job ID, poll later)
+curl -F "file=@audio.wav" "{host}/transcribe?async=true"
+curl "{host}/transcribe/status/<job_id>"
+```
+
+### OpenAI Compatible Endpoint
+
+```bash
+# Compatible with OpenAI Whisper API format
+curl -F "file=@audio.wav" \\
+  -F "model=tiny" \\
+  -F "response_format=json" \\
+  {host}/v1/audio/transcriptions
+
+# SRT subtitles output
+curl -F "file=@audio.wav" \\
+  -F "response_format=srt" \\
+  {host}/v1/audio/transcriptions
+```
+
+## API Endpoints
+
+### POST /transcribe
+
+Main transcription endpoint with flexible input options.
+
+**Parameters:**
+- `file` (multipart): Audio file upload
+- `b64` (JSON/form): Base64 encoded audio data
+- `language` (query/form): Language code (default: 'en')
+- `model` (query/form): Whisper model name (default: 'tiny')
+- `async` (query): Set to 'true' for async mode
+- `initial_prompt` (form/JSON): Optional prompt to guide transcription
+
+**Supported Models:** tiny, base, small, medium, large
+
+**Response (sync mode):**
+```json
+{{
+  "text": "Transcribed text here",
+  "duration_s": 1.23,
+  "model": "tiny",
+  "language": "en"
+}}
+```
+
+**Response (async mode):**
+```json
+{{
+  "job_id": "job_123_1234567890",
+  "status": "queued",
+  "message": "Poll /transcribe/status/<job_id> for results"
+}}
+```
+
+### GET /transcribe/status/<job_id>
+
+Poll status of an async transcription job.
+
+**Response:**
+```json
+{{
+  "job_id": "job_123_1234567890",
+  "status": "complete",
+  "result": {{
+    "text": "Transcribed text",
+    "duration_s": 1.23
+  }},
+  "queued_at": "2024-01-01T12:00:00",
+  "started_at": "2024-01-01T12:00:01",
+  "completed_at": "2024-01-01T12:00:05"
+}}
+```
+
+### POST /v1/audio/transcriptions
+
+OpenAI Whisper API compatible endpoint.
+
+**Parameters:**
+- `file` (required): Audio file
+- `model`: Model name (default: tiny)
+- `response_format`: json|text|srt|vtt|verbose_json (default: json)
+- `language`: Language code
+- `prompt`: Optional transcription guide
+- `temperature`: Sampling temperature (0-1)
+
+### GET /health
+
+Service health check and queue status.
+
+**Response:**
+```json
+{{
+  "status": "ok",
+  "model_loaded": true,
+  "loaded_models": ["tiny"],
+  "queue": {{
+    "max_workers": 1,
+    "active_workers": 1,
+    "queued_jobs": 2,
+    "processing_jobs": 1
+  }}
+}}
+```
+
+### GET /openapi.json
+
+OpenAPI 3.0 specification for the service.
+
+## Supported Audio Formats
+
+- WAV (PCM)
+- MP3
+- M4A/AAC
+- OGG
+- FLAC
+- And most formats supported by FFmpeg
+
+## Configuration (Environment Variables)
+
+- `MAX_CONCURRENT_TRANSCRIPTIONS`: Max parallel transcriptions (default: 1)
+- `MAX_QUEUE_SIZE`: Maximum queue size (default: 5)
+- `AVG_TRANSCRIPTION_TIME_SECONDS`: For retry estimates (default: 30)
+- `PORT`: Server port (default: 8080)
+- `HOST`: Server host (default: 0.0.0.0)
+
+## Error Handling
+
+All errors include:
+- `error_code`: Machine-readable error code
+- `message`: Human-readable description
+- `details`: Specific error information
+- `troubleshooting`: Helpful debugging tips
+
+Common error codes:
+- `MISSING_INPUT`: No audio file provided
+- `INVALID_INPUT`: Invalid base64 or audio data
+- `QUEUE_FULL`: Service busy, retry with backoff
+- `TIMEOUT`: Request took too long
+- `PROCESSING_ERROR`: Transcription failed
+
+## Best Practices
+
+1. **For CPU-only deployments**: Keep `MAX_CONCURRENT_TRANSCRIPTIONS=1`
+2. **For high throughput**: Use async mode and poll for results
+3. **For live transcription**: Send short overlapping chunks (1-2s)
+4. **For low bandwidth**: Use 8kHz mono WAV or low-bitrate M4A
+5. **Handle 503 responses**: Implement exponential backoff
+
+## Audio Optimization Tips
+
+```bash
+# Create telephone-quality audio (8kHz, 300-3400Hz)
+ffmpeg -i input.m4a -af "highpass=f=300,lowpass=f=3400" \\
+  -ar 8000 -ac 1 -c:a pcm_s16le output.wav
+
+# Low bitrate M4A for minimal upload size
+ffmpeg -i input.m4a -ar 16000 -ac 1 -c:a aac -b:a 16k output.m4a
+```
+
+## Integration Examples
+
+### Python
+```python
+import requests
+
+# Simple transcription
+with open('audio.wav', 'rb') as f:
+    response = requests.post(
+        '{host}/transcribe',
+        files={{'file': f}}
+    )
+    print(response.json()['text'])
+
+# Async transcription
+response = requests.post(
+    '{host}/transcribe?async=true',
+    files={{'file': open('audio.wav', 'rb')}}
+)
+job_id = response.json()['job_id']
+
+# Poll for results
+import time
+while True:
+    status = requests.get(f'{host}/transcribe/status/{{job_id}}')
+    if status.json()['status'] == 'complete':
+        print(status.json()['result']['text'])
+        break
+    time.sleep(1)
+```
+
+### JavaScript/Node.js
+```javascript
+const FormData = require('form-data');
+const fs = require('fs');
+const fetch = require('node-fetch');
+
+const form = new FormData();
+form.append('file', fs.createReadStream('audio.wav'));
+
+fetch('{host}/transcribe', {{
+  method: 'POST',
+  body: form
+}})
+.then(r => r.json())
+.then(data => console.log(data.text));
+```
+
+### bash/curl
+```bash
+# Simple transcription
+curl -F "file=@audio.wav" {host}/transcribe | jq -r '.text'
+
+# With error handling
+response=$(curl -s -w "\\n%{{http_code}}" -F "file=@audio.wav" {host}/transcribe)
+http_code=$(echo "$response" | tail -n1)
+body=$(echo "$response" | sed '$d')
+
+if [ "$http_code" -eq 200 ]; then
+  echo "$body" | jq -r '.text'
+else
+  echo "Error: $body" >&2
+fi
+```
+
+## Deployment
+
+```bash
+# Install via uvx (no clone needed)
+uvx --from git+https://github.com/raymondclowe/mini_transcriber mini-transcriber-server
+
+# Or clone and run
+git clone https://github.com/raymondclowe/mini_transcriber
+cd mini_transcriber
+./setup.sh  # Linux/macOS
+python app.py
+
+# Docker (if Dockerfile exists)
+docker build -t mini-transcriber .
+docker run -p 8080:8080 mini-transcriber
+
+# Systemd service
+sudo cp mini-transcriber.service /etc/systemd/system/
+sudo systemctl enable --now mini-transcriber
+```
+
+## Performance Characteristics
+
+- **Cold start**: 2-10s (model loading)
+- **Typical latency**: 0.5-2s per second of audio (CPU, tiny model)
+- **Memory usage**: ~150MB RSS for tiny model
+- **Recommended chunk size**: 1-3 seconds for live transcription
+
+## Limitations
+
+- CPU-optimized (GPU acceleration not included by default)
+- Single-threaded processing per worker (configurable workers)
+- No speaker diarization (who spoke when)
+- English-optimized (supports other languages but may be less accurate)
+
+## Additional Resources
+
+- GitHub Repository: https://github.com/raymondclowe/mini_transcriber
+- OpenAI Whisper: https://github.com/openai/whisper
+- Stress Testing Guide: See tests/STRESS_TESTING.md
+- Full Documentation: See README.md
+
+## Support
+
+For issues, feature requests, or contributions:
+- GitHub Issues: https://github.com/raymondclowe/mini_transcriber/issues
+- Pull Requests: https://github.com/raymondclowe/mini_transcriber/pulls
+
+---
+
+*This service is built for developers and AI systems. For LLM integration, use the structured API endpoints above. All endpoints return JSON with consistent error handling.*
+"""
+    
+    return llm_doc, 200, {'Content-Type': 'text/plain; charset=utf-8'}
+
+
 @app.route('/openapi.json', methods=['GET'])
 def openapi():
     """Return a minimal OpenAPI 3 spec describing the service for automated discovery.
@@ -818,6 +1141,25 @@ def openapi():
                                             "status": {"type": "string"},
                                             "model_loaded": {"type": "boolean"}
                                         }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "/llm.txt": {
+                "get": {
+                    "summary": "LLM-friendly API documentation",
+                    "description": "Returns comprehensive markdown documentation about the mini_transcriber service, optimized for AI models and developers",
+                    "responses": {
+                        "200": {
+                            "description": "Markdown documentation",
+                            "content": {
+                                "text/plain": {
+                                    "schema": {
+                                        "type": "string",
+                                        "description": "Markdown formatted documentation including API endpoints, examples, and best practices"
                                     }
                                 }
                             }
