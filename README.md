@@ -138,8 +138,9 @@ uv add --frozen --requirements requirements-cpu.txt
 uv run python -m pip check
 ```
 
-This will install the exact pinned CPU packages (including `torch==2.2.2+cpu`) and
-prevent any GPU/CUDA wheels (triton/nvidia) from being pulled. If you need GPU
+This will install the exact pinned CPU packages (torch and torchaudio CPU wheels) and
+prevent any GPU/CUDA wheels (triton/nvidia) from being pulled. The PyTorch CPU index
+configuration in `pyproject.toml` ensures CPU-only wheels are selected. If you need GPU
 capability intentionally, use `requirements-full.txt` or set `INSTALL_FULL=1` in
 `setup.sh` on a machine that has proper GPU drivers.
 
